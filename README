@@ -1,0 +1,16 @@
+Welcome to the FractDroidGL project
+
+FractDroidGL is a fractional function opengl renderer for Android, powered by Necessitas Qt.
+
+Install
+
+1, In order to build FractDroidGL, you have to install Necessitas SDK first. Please follow the details in:
+http://sourceforge.net/p/necessitas/home/necessitas/
+
+2, Connect your device ( Android 2.3.3+ and OpenGL ES 2.0 support required ) to your machine
+
+3, Run ncessitas, open FractDroidGL.pro, click rebuild project.
+
+4, Click run. It should deploy an apk to your device. Have fun.
+
+For more details, please email to eric84720 at gmail dot com.

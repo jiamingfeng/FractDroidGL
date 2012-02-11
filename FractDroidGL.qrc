@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/FractDroidGL">
+        <file>Resources/lookup.png</file>
+        <file>Resources/frag.glsl</file>
+        <file>Resources/vert.glsl</file>
+        <file>Resources/mandelbrot_vert.glsl</file>
+        <file>Resources/mandelbrot_frag.glsl</file>
+    </qresource>
+</RCC>
