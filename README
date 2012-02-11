@@ -13,4 +13,7 @@ http://sourceforge.net/p/necessitas/home/necessitas/
 
 4, Click run. It should deploy an apk to your device. Have fun.
 
+The amazing thing about using Ncessitas project is that you can open .pro file in a normal QCreator on your PC, build and run a PC version of the app without any modification. So, you can debug the app in your PC just like a regular PC App and deploy to your device if you feel confident or try to test multi-touch function.
+
+
 For more details, please email to eric84720 at gmail dot com.
