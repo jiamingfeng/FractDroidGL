@@ -20,19 +20,51 @@
 //DONT CHANAGE THE ORDER OF THE FOLLOWING ATTRIBUTES/UNIFORMS
 //SINCE IT SHARE VARIABLE POSITION INDEXES WITH OTHER SHADERS
 
+#if defined GL_ES
+#define double float
+#define dvec2 vec2
+#else
+#extension GL_ARB_gpu_shader_fp64 : enable
+#endif
+
 //===============BEGIN===================================
 uniform mediump mat4 MVP; // model-view-project matrix
 attribute mediump vec2 Position;
 attribute mediump vec2 InTexCoord;
+uniform mediump float scale;        //zoom factor
 //===============END=====================================
 
-uniform mediump float scale;
-
-varying mediump vec2 TexCoord;
+uniform mediump vec2 resolution;    //use to keep the proportion of mandelbrot set
+uniform mediump float rotRadian;    //rotation in radian
+uniform mediump vec2 rotatePivot;
+//uniform mediump mat4 rotMat;
+uniform mediump vec2 center;
+varying highp vec2 TexCoord;
 
 
 void main(void)
 {
     gl_Position = MVP *  vec4(Position, 0.0, 1.0);
-    TexCoord = (InTexCoord - 0.5) * 4.0 / scale;
+
+//    mediump vec2 rotCenter;
+//    rotCenter.x = center.x * cos(-rotRadian) - center.y * sin(-rotRadian);
+//    rotCenter.y = center.y * cos(-rotRadian) + center.x * sin(-rotRadian);
+
+    mediump float stScale = resolution.x / resolution.y;
+    mediump vec2 TexCoordOrig = vec2((InTexCoord.x -0.5) * stScale, InTexCoord.y - 0.5) * 4.0 / scale + center;
+
+    TexCoordOrig -= rotatePivot;
+
+    TexCoord.x = TexCoordOrig.x * cos(rotRadian) - TexCoordOrig.y * sin(rotRadian);
+    TexCoord.y = TexCoordOrig.y * cos(rotRadian) + TexCoordOrig.x * sin(rotRadian);
+
+    //mediump vec4 result = vec4(rotMat * vec4(TexCoordOrig, 0.0, 0.0));
+    //TexCoord = result.st;
+
+    //TexCoord += rotatePivot;
+
+
+
+    TexCoord += rotatePivot;
+
 }

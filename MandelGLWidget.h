@@ -28,8 +28,14 @@
 #include <QThread>
 
 QT_BEGIN_NAMESPACE
+    // opengl classes
 	class QGLShaderProgram;
     class QGLFramebufferObject;
+
+    //gesture classes
+    class QGestureEvent;
+    class QPanGesture;
+    class QPinchGesture;
 QT_END_NAMESPACE
 
 class BufferSwapWorker;
@@ -42,8 +48,9 @@ public:
 
     enum MultiTouchGestures
     {
-        PIN_ZOOM,
-        ROTATE
+        NONE     = 0,
+        PIN_ZOOM = 1,
+        PIN_ROTATE   = 2
     };
 
 	MandelGLWidget(QWidget* parentWindow = 0);
@@ -72,13 +79,17 @@ protected:
     // devices with keyboard only
     void keyPressEvent(QKeyEvent *event);
 
-    // handel the touch events
+    // handel the gesture events
     bool event(QEvent *event);
+    bool gestureEvent(QGestureEvent *event);
+    void handelPanGesture(QPanGesture *gesture);
+    void handelPinchGesture(QPinchGesture *gesture);
 
 
 private:
     // update center position of the mandelbrot
-    void UpdateMandelbrotPos();
+    void UpdateMandelbrotCenter(QPointF& pixelOffset);
+    void UpdateRotationPivot(/*int screenX, int screenY*/);
     void UpdateProjectedScales();
     void DrawHUD();
     void ComputeHUDRect(bool forceUpdate = false);
@@ -114,15 +125,18 @@ private:
     GLint posAttrLoc;
     GLint uvAttrLoc;
     GLint scaleUniformLoc;
+    GLint rotationUniformLoc;
+    GLint rotationPivotUniformLoc;
 
-    // uniform locations for mandelbrot fragment shader (fast data updating)
+    // uniform locations for mandelbrot shader (fast data updating)
     GLint iterUniformLoc;
     GLint centerUniformLoc;
     GLint resolutionLoc;
     GLint lookupTextureLoc;
 
-    // uniform locations for post process fragment shader (fast data updating)
+    // uniform locations for post process  shader (fast data updating)
     GLint texCoodOffsetLoc;
+    GLint rotationOffsetLoc;
     GLint imagescaleUniformLoc;
     GLint fboTextureLoc;
 
@@ -132,21 +146,26 @@ private:
     QPointF pixelOffset;
     QPointF lastDragPos;
     //QLineF originalLine;
-    QPointF originalP0P1;
+    //QVector2D originalP0P1;
+    //QPointF touchPos;
     QVector2D centerPos;
     float scaleFactor;
     float previousScale;
+    float currentScaleFactor;
     QPointF projectedScaleFactor;
     float maxInterations;
-    qreal rotateAngle;
+    float rotation; //rotation in radian
+    //QMatrix4x4 rotMat;
+    QVector2D rotationPivot;
 
     // image manipulate parameters for final image
     QVector2D textCoordOffset;
+    float rotationOffset;
     float imageScale;
 
-    MultiTouchGestures currentGesture;
-
     bool renderMandelbrot;
+
+    MultiTouchGestures currentGesture;
 
 
     // statics

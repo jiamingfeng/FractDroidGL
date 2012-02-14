@@ -1,6 +1,6 @@
 /*
  * This file is auto-generated.  DO NOT MODIFY.
- * Original file: /home/eric/projects/FractDroidGL/android/src/org/kde/necessitas/ministro/IMinistroCallback.aidl
+ * Original file: /home/eric/Dropbox/code/FractDroidGL/android/src/org/kde/necessitas/ministro/IMinistroCallback.aidl
  */
 package org.kde.necessitas.ministro;
 public interface IMinistroCallback extends android.os.IInterface

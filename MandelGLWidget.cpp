@@ -21,7 +21,7 @@
 #include <QtOpenGL/QtOpenGL>
 #include <QtCore/qmath.h>
 
-//#include "bufferswapworker.h"
+#include <math.h>
 
 // updates with highest framerate
 #define PERFORMANCE_TEST
@@ -37,14 +37,15 @@ const GLfloat quad_uvs[]      = { 0.0f, 1.0f, 1.0f, 1.0f,
                                   1.0f, 0.0f,  0.0f, 0.0f };
 const GLushort quad_indices[] = {0,1,2, 2,3,0};
 
+
+
 const float ZOOM_STEP = 1.2f;           // zoom step for pin zoom
 const float INTERATION_STEP = 1.06f;    // interaction change step
 
-const float PIN_ZOOM_THRESHOLD = 0.8f;  // pin zoom threhold dot angle
+const float PIN_ROTATE_THRESHOLD = 0.2f;   // pin rotate threhold in degree
 
-const float MULTI_TOUCH_ROTATE = 0.2f;  // multi touch rotate threhold dot angle
-
-const float RADIAN_TO_DEGREE = 57.2957795f; // 180 / PI
+const float RADIAN_TO_DEGREE = 57.295779513082320876798154814105f; // 180 / PI
+const float DEGREE_TO_RADIAN = 0.01745329251994329576923690768489f; // PI / 180
 
 MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     : QGLWidget(parentWindow)
@@ -62,6 +63,7 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     posAttrLoc = 0;
     uvAttrLoc = 0;
     scaleUniformLoc = 0;
+    rotationPivotUniformLoc = 0;
 
     // uniform locations for fragment shader (fast data updating)
     iterUniformLoc = 0;
@@ -69,10 +71,12 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     resolutionLoc = 0;
 
     // default values for the shader
-    centerPos = QVector2D(-0.5f, 0.0f);
+    centerPos = QVector2D(-0.5, 0.0);
     scaleFactor = 1.0f;
-    previousScale = 0.9f;
+    previousScale = 1.0f;
     maxInterations = 64.0f;
+
+
 
     // statistics
     frames = 0;
@@ -81,26 +85,25 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
 
     UpdateProjectedScales();
 
-    // turn of touch events
-    setAttribute(Qt::WA_AcceptTouchEvents);
-
     // disable background filling
     setAutoFillBackground(false);
     setAttribute(Qt::WA_NoSystemBackground, true);
-    //setAttribute(Qt::WA_PaintOnScreen, true);
     setAutoBufferSwap(false);
 
-    rotateAngle = 0.0;
+    rotation = 0.0f;
+    rotationOffset = 0.0f;
     imageScale = 1.0f;
-    currentGesture = PIN_ZOOM;
     renderMandelbrot = true;
 
-    // threads
-    //swapBufferWorker = new BufferSwapWorker(this);
+    // turn of touch events
+    setAttribute(Qt::WA_AcceptTouchEvents);
+    //setAttribute(Qt::WA_TouchPadAcceptSingleTouchEvents);
 
-    //swapBufferWorker->moveToThread(&swapBufferThread);
-    //connect(this, SIGNAL(NeedSwapBuffer()), swapBufferWorker, SLOT(SwapBuffer()), Qt::AutoConnection);
-    //connect(swapBufferWorker, SIGNAL(DoneSwaping()), this, SLOT(startRendering()), Qt::AutoConnection);
+    // enable gesture events
+    //grabGesture(Qt::PanGesture);
+    grabGesture(Qt::PinchGesture);
+
+    currentGesture = MandelGLWidget::NONE;
 }
 
 MandelGLWidget::~MandelGLWidget()
@@ -222,6 +225,9 @@ void MandelGLWidget::initializeGL()
     // Get the uniform locations from fragment shader
     iterUniformLoc = mandelProgram->uniformLocation("maxIterations");
     scaleUniformLoc = mandelProgram->uniformLocation("scale");
+    rotationUniformLoc = mandelProgram->uniformLocation("rotRadian");
+    rotationPivotUniformLoc = mandelProgram->uniformLocation("rotatePivot");
+
     centerUniformLoc = mandelProgram->uniformLocation("center");
     resolutionLoc = mandelProgram->uniformLocation("resolution");
     lookupTextureLoc = mandelProgram->uniformLocation("lookUpTexture");
@@ -265,6 +271,7 @@ void MandelGLWidget::initializeGL()
     postEffectProgram->bind();
 
     texCoodOffsetLoc = postEffectProgram->uniformLocation("TexCoordoffset");
+    rotationOffsetLoc = postEffectProgram->uniformLocation("RotationOffset");
     imagescaleUniformLoc = postEffectProgram->uniformLocation("scale");
     fboTextureLoc = postEffectProgram->uniformLocation("fboTexture");
 
@@ -352,9 +359,11 @@ void MandelGLWidget::paintGL()
         mandelProgram->enableAttributeArray(uvAttrLoc);
         mandelProgram->setAttributeArray(uvAttrLoc, quad_uvs, 2 );
 
-        // fragment shader uniforms
+        // set shader uniforms
         mandelProgram->setUniformValue(iterUniformLoc, maxInterations);
         mandelProgram->setUniformValue(scaleUniformLoc, scaleFactor);
+        mandelProgram->setUniformValue(rotationUniformLoc, rotation);
+        mandelProgram->setUniformValue(rotationPivotUniformLoc, rotationPivot);
         mandelProgram->setUniformValue(centerUniformLoc, centerPos);
         mandelProgram->setUniformValue(resolutionLoc,
             QVector2D(float(this->width()), float(this->height())));
@@ -377,6 +386,12 @@ void MandelGLWidget::paintGL()
         fbo->release();
 
         renderMandelbrot = false;
+
+        // zero the temp offset after we update the actual computing result
+        textCoordOffset.setX(0);
+        textCoordOffset.setY(0);
+        rotationOffset = 0.0f;
+        imageScale = 1.0f;
     }
 
     glClear(GL_COLOR_BUFFER_BIT);
@@ -398,6 +413,7 @@ void MandelGLWidget::paintGL()
     postEffectProgram->setUniformValue( projUniformLoc, projectMat );
     postEffectProgram->setUniformValue( imagescaleUniformLoc, imageScale );
     postEffectProgram->setUniformValue( texCoodOffsetLoc, textCoordOffset);
+    postEffectProgram->setUniformValue( rotationOffsetLoc, rotationOffset);
 
     postEffectProgram->setUniformValue( fboTextureLoc, 0);
 
@@ -411,6 +427,9 @@ void MandelGLWidget::paintGL()
 
     //render the mandelbrot image ends
     postEffectProgram->release();
+
+
+
 
     // build the HUG message
 
@@ -432,7 +451,7 @@ void MandelGLWidget::paintGL()
     hudMessage += tempStr;
 
     hudMessage += "\nRot: ";
-    tempStr.setNum(rotateAngle, 'f', 2);
+    tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 2);
     hudMessage += tempStr;
 
     // reset the time every 100 frames
@@ -511,7 +530,7 @@ void MandelGLWidget::mouseMoveEvent(QMouseEvent *event)
         lastDragPos = event->pos();
 
         //update shader position
-        UpdateMandelbrotPos();
+        UpdateMandelbrotCenter();
 
         //pan the current texture
         textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
@@ -521,6 +540,7 @@ void MandelGLWidget::mouseMoveEvent(QMouseEvent *event)
 
 void MandelGLWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    Q_UNUSED(event);
     // resume the rendering after mouse released
     renderMandelbrot = true;
     textCoordOffset.setX(0);
@@ -549,6 +569,21 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
 
         renderMandelbrot = true;
         break;
+
+    // rotate 5 degree counter clockwise
+    case Qt::Key_Up:
+        rotation += 5.0f * DEGREE_TO_RADIAN;
+        UpdateRotationPivot();
+        renderMandelbrot = true;
+        break;
+
+    // rotate 5 degree clockwise
+    case Qt::Key_Down:
+        rotation -= 5.0f * DEGREE_TO_RADIAN;
+        UpdateRotationPivot();
+        renderMandelbrot = true;
+        break;
+
     case Qt::Key_Escape:
         this->close();
         break;
@@ -559,165 +594,228 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
 
 bool MandelGLWidget::event(QEvent *event)
 {
-    switch (event->type())
+    if (event->type() == QEvent::TouchBegin  ||
+        event->type() == QEvent::TouchUpdate ||
+        event->type() == QEvent::TouchEnd    )
     {
-    case QEvent::TouchBegin:
-    case QEvent::TouchUpdate:
-    case QEvent::TouchEnd:
+        QTouchEvent *touchEvent = static_cast<QTouchEvent *>(event);
+        QList<QTouchEvent::TouchPoint> touchPoints = touchEvent->touchPoints();
+        const QTouchEvent::TouchPoint &touchPoint0 = touchPoints.first();
+
+        // one touch points are for moving around the center point
+        if (touchPoints.count() == 1)
         {
-            QTouchEvent *touchEvent = static_cast<QTouchEvent *>(event);
-            QList<QTouchEvent::TouchPoint> touchPoints = touchEvent->touchPoints();
-            const QTouchEvent::TouchPoint &touchPoint0 = touchPoints.first();
-
-            // one touch points are for moving around the center point
-            if (touchPoints.count() == 1)
+            if ( touchEvent->touchPointStates() & Qt::TouchPointPressed )
             {
-                if ( touchEvent->touchPointStates() & Qt::TouchPointPressed )
-                {
-                    lastDragPos = touchPoint0.startPos();
+                lastDragPos = touchPoint0.startPos();
 
-                    //stop the mandelbrot rendering
-                    renderMandelbrot = false;
+                //stop the mandelbrot rendering
+                renderMandelbrot = false;
 
-                }
-                else if ( touchEvent->touchPointStates() & Qt::TouchPointMoved )
-                {
-                    pixelOffset = touchPoint0.pos() - lastDragPos;
-                    lastDragPos = touchPoint0.pos();
+            }
+            else if ( touchEvent->touchPointStates() & Qt::TouchPointMoved )
+            {
+                //stop the mandelbrot rendering
+                renderMandelbrot = false;
 
-                    UpdateMandelbrotPos();
+                pixelOffset = touchPoint0.pos() - lastDragPos;
+                lastDragPos = touchPoint0.pos();
 
-                    //pan the current texture
-                    textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
-                    textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
-                }
-                else if ( touchEvent->touchPointStates() & Qt::TouchPointReleased )
-                {
-                    // resume the rendering after mouse released
-                    renderMandelbrot = true;
-                    textCoordOffset.setX(0);
-                    textCoordOffset.setY(0);
-                }
+                UpdateMandelbrotCenter(pixelOffset);
+
+                UpdateRotationPivot();
+
+                //pan the current texture
+                textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
+                textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
+            }
+            else if ( touchEvent->touchPointStates() & Qt::TouchPointReleased )
+            {
+                // resume the rendering after mouse released
+                renderMandelbrot = true;
             }
 
-            // multi touch zoom / rotate
-            else if (touchPoints.count() == 2)
-            {                
-                // determine scale factor
-
-                // calculate the vector for two touch points
-                const QTouchEvent::TouchPoint &touchPoint1 = touchPoints.last();
-                if ( touchEvent->touchPointStates() & Qt::TouchPointPressed )
-                {
-                    renderMandelbrot = false;
-                    // p1: touch point 0
-                    // p2: touch point 1
-                    //originalLine = QLineF(touchPoint0.startPos(), touchPoint1.startPos());
-                    originalP0P1 = touchPoint0.startPos() - touchPoint1.startPos();
-                }
-                else if ( touchEvent->touchPointStates() & Qt::TouchPointMoved )
-                {
-                    // determine the type of gesture by checking the vector formed by touch points
-                    //QVector2D v0(touchPoint0.pos() - originalLine.p1());     //touch point 0 vector
-                    //QVector2D v1(touchPoint1.pos() - originalLine.p2());     // touch point 1 vector
-                    //QVector2D v2(originalLine.p1() - originalLine.p2());     // touch points 0->1 vector (original)
-                    //QVector2D v3(touchPoint0.pos() - touchPoint1.pos());     // touch points 0->1 vector (now)
-
-                    //v0.normalize();
-                    //v1.normalize();
-                    //v2.normalize();
-                    //v3.normalize();
-
-                    //qreal dotV0V2 = QVector2D::dotProduct(v0, -v2);
-                    //qreal dotV1V2 = QVector2D::dotProduct(v1,  v2);
-                    //qreal dotRotate = QVector2D::dotProduct(v2, v3);
-                    //qreal dotv0v1 = QVector2D::dotProduct(v0,  v1);
-
-
-                    //if ( dotv0v1 < 0.0f )
-                    {
-                        //qreal additionAngle = qAcos(dotRotate) * RADIAN_TO_DEGREE;
-
-
-                        //if(qAbs(additionAngle) < 5.0)
-                        {
-                            //currentGesture = MandelGLWidget::PIN_ZOOM;
-                            //QLineF currentLine(touchPoint0.pos(), touchPoint1.pos());
-                            //qreal currentScaleFactor = currentLine.length() / originalLine.length();
-                            QPointF currentP0P1 = touchPoint0.pos() - touchPoint1.pos();
-                            qreal currentScaleFactor = currentP0P1.manhattanLength() / originalP0P1.manhattanLength();
-
-
-                            originalP0P1 = currentP0P1;
-
-                            scaleFactor *= currentScaleFactor;
-
-                            float scaleLevel = scaleFactor / previousScale;
-
-
-                            if( scaleLevel > ZOOM_STEP )
-                            {
-                                maxInterations *= INTERATION_STEP;
-                                previousScale = scaleFactor;
-                            }
-                            else if ( scaleLevel  < 1.0f / ZOOM_STEP )
-                            {
-                                maxInterations /= INTERATION_STEP;
-                                previousScale = scaleFactor;
-                            }
-
-                            imageScale *= currentScaleFactor;
-
-                            //make sure reset the texture coordiniate offset in zoom mode
-                            textCoordOffset.setX(0);
-                            textCoordOffset.setY(0);
-
-                            //additionAngle = 0.0f;
-                        }
-
-//                        rotateAngle += additionAngle;
-
-//                        QMatrix4x4 view;
-//                        view.rotate((int)rotateAngle % 360, 0, 0, 1);
-//                        modelViewProjection = modelViewProjection * view;
-                    }
-                }
-
-
-                else if (touchEvent->touchPointStates() & Qt::TouchPointReleased)
-                {
-//                    QPointF currentP0P1 = touchPoint0.pos() - touchPoint1.pos();
-//                    qreal currentScaleFactor = currentP0P1.manhattanLength() / originalP0P1.manhattanLength();
-
-//                    originalP0P1 = currentP0P1;
-
-//                    // if one of the fingers is released, remember the current scale
-//                    // factor so that adding another finger later will continue zooming
-//                    // by adding new scale factor to the existing remembered value.
-//                    scaleFactor *= currentScaleFactor;
-//                    currentScaleFactor = 1;
-
-                    renderMandelbrot = true;
-                    imageScale = 1.0f;
-                }
-            }
             return true;
         }
-    default:
-        return QGLWidget::event(event);
+
+
     }
+
+    else if (event->type() == QEvent::Gesture)
+        return gestureEvent(static_cast<QGestureEvent*>(event));
+
+    return QGLWidget::event(event);
+}
+
+bool MandelGLWidget::gestureEvent(QGestureEvent *event)
+{
+    //disable pan gesture for now since it only support two touch points pan
+
+//    if (QGesture *pan = event->gesture(Qt::PanGesture))
+//        handelPanGesture(static_cast<QPanGesture *>(pan));
+
+    if (QGesture *pinch = event->gesture(Qt::PinchGesture))
+        handelPinchGesture(static_cast<QPinchGesture *>(pinch));
+
     return true;
 }
 
-void MandelGLWidget::UpdateMandelbrotPos()
+void MandelGLWidget::handelPanGesture(QPanGesture *gesture)
 {
+
+    switch (gesture->state())
+    {
+    case Qt::GestureStarted:
+        //stop the mandelbrot rendering
+        renderMandelbrot = false;
+        break;
+    case Qt::GestureUpdated:
+    {
+        //stop the mandelbrot rendering
+        renderMandelbrot = false;
+#ifndef QT_NO_CURSOR
+        setCursor(Qt::SizeAllCursor);
+#endif
+
+        QPointF pixelOffset = gesture->delta();
+
+        UpdateMandelbrotCenter(pixelOffset);
+
+        UpdateRotationPivot();
+
+        //pan the current texture
+        textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
+        textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
+    }
+        break;
+
+    case Qt::GestureFinished:
+    case Qt::GestureCanceled:
+        //resume the mandelbrot rendering
+        renderMandelbrot = true;
+        break;
+    default:
+#ifndef QT_NO_CURSOR
+        setCursor(Qt::ArrowCursor);
+#endif
+    }
+}
+
+
+void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
+{
+    currentScaleFactor = 1.0f;
+
+    switch (gesture->state())
+    {
+    case Qt::GestureStarted:
+        //stop the mandelbrot rendering
+        renderMandelbrot = false;
+        break;
+    case Qt::GestureUpdated:
+    {
+        //stop the mandelbrot rendering
+        renderMandelbrot = false;
+
+        QPinchGesture::ChangeFlags changeFlags = gesture->changeFlags();
+
+        // TODO:: fix the rotation bug
+        if ( changeFlags & QPinchGesture::RotationAngleChanged)
+        {
+            qreal value = gesture->rotationAngle();
+            qreal lastValue = gesture->lastRotationAngle();
+            qreal deltaAngle = (value - lastValue) * DEGREE_TO_RADIAN;
+
+            if ( qAbs(deltaAngle) > PIN_ROTATE_THRESHOLD  )
+            {
+                // set current gesture as rotate
+                currentGesture = MandelGLWidget::PIN_ROTATE;
+            }
+
+            // only update the rotation if it is rotate mode
+            if ( currentGesture == MandelGLWidget::PIN_ROTATE)
+            {
+                rotation        += deltaAngle;
+                rotationOffset  += deltaAngle;
+
+                UpdateRotationPivot();
+            }
+
+
+        }
+
+        // zoom only if we are not in rotate mode
+        if ( currentGesture != MandelGLWidget::PIN_ROTATE && changeFlags & QPinchGesture::ScaleFactorChanged)
+        {
+            currentScaleFactor = gesture->scaleFactor();
+
+            scaleFactor *= currentScaleFactor;
+            imageScale *= currentScaleFactor;
+
+            currentScaleFactor = 1.0f;
+
+            // update the interation according to the zoom level
+            float scaleLevel = scaleFactor / previousScale;
+            if( scaleLevel > ZOOM_STEP )
+            {
+                maxInterations *= INTERATION_STEP;
+                previousScale = scaleFactor;
+            }
+            else if ( scaleLevel  < 1.0f / ZOOM_STEP )
+            {
+                maxInterations /= INTERATION_STEP;
+                previousScale = scaleFactor;
+            }
+
+            currentGesture = MandelGLWidget::PIN_ZOOM;
+        }
+
+
+
+
+    }
+        break;
+
+    case Qt::GestureFinished:
+    case Qt::GestureCanceled:
+        //resume the mandelbrot rendering
+        renderMandelbrot = true;
+
+        //reset the current gesture to none
+        currentGesture = MandelGLWidget::NONE;
+        break;
+
+    default:
+        break;
+    }
+
+}
+
+void MandelGLWidget::UpdateMandelbrotCenter(QPointF& pixelOffset)
+{
+    QPointF rotatedOffset;
+
+    rotatedOffset.setX ( pixelOffset.x() * cos(-rotation) - pixelOffset.y() * sin(-rotation));
+    rotatedOffset.setY ( pixelOffset.y() * cos(-rotation) + pixelOffset.x() * sin(-rotation));
+
     // remap the pixel offset from [0, width][0, height] to [-2, 1][-1, 1]
-    centerPos.setX(centerPos.x() + pixelOffset.x() * projectedScaleFactor.x() / scaleFactor);
-    centerPos.setY(centerPos.y() + pixelOffset.y() * projectedScaleFactor.y() / scaleFactor);
-    //centerPos += QVector2D(pixelOffset.x() * -0.00234375f,
-    //                       pixelOffset.y() * -0.00277778f);
-    //centerPos.setX(centerPos.x() + pixelOffset.x() * -0.00234375f);
-    //centerPos.setY(centerPos.y() + pixelOffset.y() * -0.00277778f);
+    qreal centerX = centerPos.x() + rotatedOffset.x() * projectedScaleFactor.x() / scaleFactor;
+    qreal centerY = centerPos.y() + rotatedOffset.y() * projectedScaleFactor.y() / scaleFactor;
+
+    centerPos.setX(centerX);
+    centerPos.setY(centerY);
+}
+
+
+void MandelGLWidget::UpdateRotationPivot(/*int screenX, int screenY*/)
+{
+    //rotationPivot.setX((float(screenX) - float(width())/2.0) * projectedScaleFactor.x() / scaleFactor + centerPos.x());// - centerPos.x());
+    //rotationPivot.setY((float(screenY) - float(height())/2.0) * projectedScaleFactor.y() / scaleFactor + centerPos.y());// - centerPos.y());
+    rotationPivot.setX(centerPos.x());
+    rotationPivot.setY(centerPos.y());
+    //rotMat.setToIdentity();
+    //rotMat.rotate(rotation * RADIAN_TO_DEGREE, 0, 0, 1);
+
 }
 
 void MandelGLWidget::UpdateProjectedScales()

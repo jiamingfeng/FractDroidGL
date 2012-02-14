@@ -19,7 +19,6 @@
 
 #include "fractDroidGL.h"
 #include "MandelGLWidget.h"
-#include "graphicsview.h"
 #include <QtGui/QApplication>
 
 int main(int argc, char *argv[])

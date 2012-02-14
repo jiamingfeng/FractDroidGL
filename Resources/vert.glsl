@@ -28,6 +28,7 @@ uniform mediump float scale;
 //===============END=====================================
 
 uniform mediump vec2 TexCoordoffset;
+uniform mediump float RotationOffset;
 
 varying mediump vec2 TexCoord;
 
@@ -35,5 +36,29 @@ varying mediump vec2 TexCoord;
 void main(void)
 {
     gl_Position = MVP * vec4(Position, 0.0, 1.0);
-    TexCoord = (InTexCoord - 0.5) / scale  + 0.5 - TexCoordoffset;
+
+    // scale the uv from [0, 1] to [-0.5, 0.5], scale it and add the texture coordinate offset
+    // translate  -(rotation center)
+    // rotate the coordinates
+    // translate  (rotation center)
+
+    //(InTexCoord - 0.5) / scale  + 0.5 - TexCoordoffset - 0.5;
+    mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale + 0.5 - TexCoordoffset;
+
+    TexCoordOrig -= 0.5;
+
+    // if the rotation angle is smaller than 0.5 degree
+    // ignore the rotation
+    //if (abs(RotationOffset) > 0.00872664626)
+    //{
+    TexCoord.x = TexCoordOrig.x * cos(-RotationOffset) - TexCoordOrig.y * sin(-RotationOffset);
+    TexCoord.y = TexCoordOrig.y * cos(-RotationOffset) + TexCoordOrig.x * sin(-RotationOffset);
+    //}
+    //else
+    //{
+    //    TexCoord = TexCoordOrig;
+    //}
+
+    TexCoord += 0.5;
+
 }

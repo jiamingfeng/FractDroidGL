@@ -25,18 +25,18 @@
 #endif
 
 
-uniform mediump vec2 resolution;
 uniform sampler2D lookUpTexture;
 uniform mediump float maxIterations;
-uniform mediump vec2 center;
+//uniform mediump vec2 center;
 
-varying mediump vec2 TexCoord;
+varying highp vec2 TexCoord;
 
 void main (void)
 {
-    mediump dvec2 c;
-    c.x = resolution.x / resolution.y * TexCoord.x + double(center.x);
-    c.y = TexCoord.y + double(center.y);
+    highp dvec2 c;
+
+    c.x = double(TexCoord.x);// + double(center.x);
+    c.y = double(TexCoord.y);// + double(center.y);
 
     mediump vec3 color = texture2D(lookUpTexture, vec2(1.0, 0.0)).bgr;
     
@@ -55,7 +55,7 @@ void main (void)
 
     if ( (4.0 * q * (q + cx) > cy2) && (cxp12 + cy2 > 0.0625))
     {
-        mediump dvec2 z = c;
+        highp dvec2 z = c;
 
         // tegra 2 CPU need to have constant loop count
         // (e.g.  i < 64 instead of i < maxIterations)
