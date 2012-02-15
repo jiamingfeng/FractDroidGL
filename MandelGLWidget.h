@@ -124,56 +124,64 @@ private:
     // projection matrix for post effect rendering
     QMatrix4x4 projectMat;
 
-    // attribute/uniform locations for mandelbrot vertex shader (fast data updating)
-    GLint projUniformLoc;
-    GLint posAttrLoc;
-    GLint uvAttrLoc;
-    GLint scaleUniformLoc;
-    GLint rotationUniformLoc;
-    GLint rotationPivotUniformLoc;
+    // attribute/uniform locations for mandelbrot shader (fast data updating)
+    GLint mvpFractLoc;               //MVP
+    GLint posFractLoc;               //Position
+    GLint uvFractLoc;                //InTexCoord
+    GLint scaleFractLoc;             //scale
+    GLint resFractLoc;               //resolution
 
-    // uniform locations for mandelbrot shader (fast data updating)
-    GLint iterUniformLoc;
-    GLint centerUniformLoc;
-    GLint resolutionLoc;
-    GLint lookupTextureLoc;
+    GLint rotFractLoc;               //rotRadian
+    GLint rotPivotFractLoc;          //rotatePivot
+    GLint iterFractLoc;              //maxIterations
+    GLint centerFractLoc;            //center
+    GLint lookupTextureLoc;          //lookUpTexture
 
     // uniform locations for post process  shader (fast data updating)
-    GLint texCoodOffsetLoc;
-    GLint rotationOffsetLoc;
-    GLint imagescaleUniformLoc;
-    GLint imageResolutionLoc;
-    GLint fboTextureLoc;
+    GLint mvpPostLoc;               //MVP
+    GLint posPostLoc;               //Position
+    GLint uvPostLoc;                //InTexCoord
+    GLint scalePostLoc;             //scale
+    GLint resPostLoc;               //resolution
+
+    GLint texCoodOffsetLoc;         //TexCoordoffset
+    GLint rotationOffsetLoc;        //RotationOffset
+    GLint fboTextureLoc;            //fbo
 
 
     
     // mouse movement and touch events
     QPointF pixelOffset;
     QPointF lastDragPos;
-    //QLineF originalLine;
-    //QVector2D originalP0P1;
-    //QPointF touchPos;
+
+    // center point of mandelbrot
     QVector2D centerPos;
+
+    // scale factor of current rendering
     float scaleFactor;
     float previousScale;
     float currentScaleFactor;
     QPointF projectedScaleFactor;
-    float maxInterations;
+
+    // rotation of current view
     float rotation; //rotation in radian
-    //QMatrix4x4 rotMat;
     QVector2D rotationPivot;
+
+    float maxInterations;
 
     // image manipulate parameters for final image
     QVector2D textCoordOffset;
     float rotationOffset;
     float imageScale;
 
+    // whether to render a new frame of mandelbrot
     bool renderMandelbrot;
 
+    // current gesture
     MultiTouchGestures currentGesture;
 
 
-    // statics
+    // statics HUD
     QString hudMessage;
     QString strFps;
     int messageLength;
@@ -182,11 +190,6 @@ private:
     QTime fpsTime;
     QPainter* textPainter;
     bool isHUDDirty;
-
-    // threads
-    //QThread swapBufferThread;
-    //BufferSwapWorker* swapBufferWorker;
-
 
 };
 

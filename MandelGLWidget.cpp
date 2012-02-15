@@ -26,6 +26,8 @@
 // updates with highest framerate
 #define PERFORMANCE_TEST
 
+#define SHOW_HUD
+
 // updates only when user interact with the mandelbrot set
 //#define INTERACTIVE_UPDATES_ONLY
 
@@ -58,25 +60,34 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
 
     shaderErrors = "";
 
-    // attribute/uniform locations for vertex shader
-    projUniformLoc = 0;
-    posAttrLoc = 0;
-    uvAttrLoc = 0;
-    scaleUniformLoc = 0;
-    rotationPivotUniformLoc = 0;
+    mvpFractLoc     = 0;
+    posFractLoc     = 0;
+    uvFractLoc      = 0;
+    scaleFractLoc   = 0;
+    resFractLoc     = 0;
 
-    // uniform locations for fragment shader (fast data updating)
-    iterUniformLoc = 0;
-    centerUniformLoc = 0;
-    resolutionLoc = 0;
+    rotFractLoc     = 0;
+    rotPivotFractLoc= 0;
+    iterFractLoc    = 0;
+    centerFractLoc  = 0;
+    lookupTextureLoc= 0;
+
+    mvpPostLoc      = 0;
+    posPostLoc      = 0;
+    uvPostLoc       = 0;
+    scalePostLoc    = 0;
+    resPostLoc      = 0;
+
+    texCoodOffsetLoc= 0;
+    rotationOffsetLoc=0;
+    fboTextureLoc   = 0;
+
 
     // default values for the shader
     centerPos = QVector2D(-0.5, 0.0);
     scaleFactor = 1.0f;
     previousScale = 1.0f;
     maxInterations = 64.0f;
-
-
 
     // statistics
     frames = 0;
@@ -201,24 +212,16 @@ void MandelGLWidget::initializeGL()
     mandelProgram->link();
     mandelProgram->bind();
 
-    // Get the attribute/uniform locations from vertex shader
-    projUniformLoc = mandelProgram->uniformLocation("MVP");
-    posAttrLoc  = mandelProgram->attributeLocation("Position");
-    uvAttrLoc   = mandelProgram->attributeLocation("InTexCoord");
-
-    // Set vertexarray to the shader
-    //mandelProgram->enableAttributeArray(posAttrLoc);
-    //mandelProgram->enableAttributeArray(uvAttrLoc);
-
-
-    // Get the uniform locations from fragment shader
-    iterUniformLoc = mandelProgram->uniformLocation("maxIterations");
-    scaleUniformLoc = mandelProgram->uniformLocation("scale");
-    rotationUniformLoc = mandelProgram->uniformLocation("rotRadian");
-    rotationPivotUniformLoc = mandelProgram->uniformLocation("rotatePivot");
-
-    centerUniformLoc = mandelProgram->uniformLocation("center");
-    resolutionLoc = mandelProgram->uniformLocation("resolution");
+    // Get the attribute/uniform locations from shaders
+    mvpFractLoc = mandelProgram->uniformLocation("MVP");
+    posFractLoc  = mandelProgram->attributeLocation("Position");
+    uvFractLoc   = mandelProgram->attributeLocation("InTexCoord");
+    scaleFractLoc = mandelProgram->uniformLocation("scale");
+    resFractLoc = mandelProgram->uniformLocation("resolution");
+    rotFractLoc = mandelProgram->uniformLocation("rotRadian");
+    rotPivotFractLoc = mandelProgram->uniformLocation("rotatePivot");
+    iterFractLoc = mandelProgram->uniformLocation("maxIterations");
+    centerFractLoc = mandelProgram->uniformLocation("center");    
     lookupTextureLoc = mandelProgram->uniformLocation("lookUpTexture");
 
     //set up the post effect shader program to do the final rendering
@@ -259,10 +262,14 @@ void MandelGLWidget::initializeGL()
     postEffectProgram->link();
     postEffectProgram->bind();
 
+    mvpPostLoc = postEffectProgram->uniformLocation("MVP");
+    posPostLoc  = postEffectProgram->attributeLocation("Position");
+    uvPostLoc   = postEffectProgram->attributeLocation("InTexCoord");
+    scalePostLoc = postEffectProgram->uniformLocation("scale");
+    resPostLoc = postEffectProgram->uniformLocation("resolution");
+
     texCoodOffsetLoc = postEffectProgram->uniformLocation("TexCoordoffset");
     rotationOffsetLoc = postEffectProgram->uniformLocation("RotationOffset");
-    imagescaleUniformLoc = postEffectProgram->uniformLocation("scale");
-    imageResolutionLoc = postEffectProgram->uniformLocation("resolution");
     fboTextureLoc = postEffectProgram->uniformLocation("fboTexture");
 
     //postEffectProgram->enableAttributeArray(posAttrLoc);
@@ -316,9 +323,12 @@ void MandelGLWidget::resizeGL(int width, int height)
     // update projection scale
     UpdateProjectedScales();
 
-    // nuke the framebuffer
-    delete fbo;
-    fbo = new QGLFramebufferObject(width, height);
+    // nuke the framebuffer if size changes
+    if (fbo->width() != width || fbo->height() != height)
+    {
+        delete fbo;
+        fbo = new QGLFramebufferObject(width, height);
+    }
 
     // re-compute the rect for HUD after resizing
     isHUDDirty = true;
@@ -330,7 +340,8 @@ void MandelGLWidget::resizeGL(int width, int height)
 void MandelGLWidget::paintGL()
 {
 
-    QVector2D resolution(float(this->width()), float(this->height()));
+    //QVector2D resolution(float(width()), float(height()));
+
     if(renderMandelbrot)
     {
         fbo->bind();
@@ -343,24 +354,23 @@ void MandelGLWidget::paintGL()
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, lookupTextureId);
 
+
         // Set vertexarray to the shader
-        mandelProgram->enableAttributeArray(posAttrLoc);
-        mandelProgram->setAttributeArray(posAttrLoc, quad_vertices, 2 );
+        mandelProgram->enableAttributeArray(posFractLoc);
+        mandelProgram->setAttributeArray(posFractLoc, quad_vertices, 2 );
 
-        mandelProgram->enableAttributeArray(uvAttrLoc);
-        mandelProgram->setAttributeArray(uvAttrLoc, quad_uvs, 2 );
+        mandelProgram->enableAttributeArray(uvFractLoc);
+        mandelProgram->setAttributeArray(uvFractLoc, quad_uvs, 2 );
 
-        // set shader uniforms
-        mandelProgram->setUniformValue(iterUniformLoc, maxInterations);
-        mandelProgram->setUniformValue(scaleUniformLoc, scaleFactor);
-        mandelProgram->setUniformValue(rotationUniformLoc, rotation);
-        mandelProgram->setUniformValue(rotationPivotUniformLoc, rotationPivot);
-        mandelProgram->setUniformValue(centerUniformLoc, centerPos);
-        mandelProgram->setUniformValue(resolutionLoc, resolution);
+        //shader's parameters
+        mandelProgram->setUniformValue( mvpFractLoc, modelViewProjection );
+        mandelProgram->setUniformValue(scaleFractLoc, scaleFactor);
+        mandelProgram->setUniformValue(resFractLoc, QVector2D(float(width()), float(height())));
+        mandelProgram->setUniformValue(rotFractLoc, rotation);
+        mandelProgram->setUniformValue(rotPivotFractLoc, rotationPivot);
+        mandelProgram->setUniformValue(iterFractLoc, maxInterations);
+        mandelProgram->setUniformValue(centerFractLoc, centerPos);
         mandelProgram->setUniformValue(lookupTextureLoc, 0);
-
-        //vertex shader uniforms
-        mandelProgram->setUniformValue( projUniformLoc, modelViewProjection );
 
         // draw the quad
         glDrawElements(GL_TRIANGLES, 2*3, GL_UNSIGNED_SHORT, quad_indices );
@@ -393,19 +403,19 @@ void MandelGLWidget::paintGL()
     glBindTexture(GL_TEXTURE_2D, fbo->texture());
 
     // Set vertexarray to the shader
-    postEffectProgram->enableAttributeArray(posAttrLoc);
-    postEffectProgram->setAttributeArray(posAttrLoc, quad_vertices, 2 );
+    postEffectProgram->enableAttributeArray(posPostLoc);
+    postEffectProgram->setAttributeArray(posPostLoc, quad_vertices, 2 );
 
-    postEffectProgram->enableAttributeArray(uvAttrLoc);
-    postEffectProgram->setAttributeArray(uvAttrLoc, quad_uvs, 2 );
+    postEffectProgram->enableAttributeArray(uvPostLoc);
+    postEffectProgram->setAttributeArray(uvPostLoc, quad_uvs, 2 );
 
     //vertex shader uniforms
-    postEffectProgram->setUniformValue( projUniformLoc, projectMat );
-    postEffectProgram->setUniformValue( imagescaleUniformLoc, imageScale );
-    postEffectProgram->setUniformValue( imageResolutionLoc,  resolution);
+    postEffectProgram->setUniformValue( mvpPostLoc, projectMat );
+    postEffectProgram->setUniformValue( scalePostLoc, imageScale );
+    postEffectProgram->setUniformValue( resPostLoc,  QVector2D(float(width()), float(height())));
+
     postEffectProgram->setUniformValue( texCoodOffsetLoc, textCoordOffset);
     postEffectProgram->setUniformValue( rotationOffsetLoc, rotationOffset);
-
     postEffectProgram->setUniformValue( fboTextureLoc, 0);
 
     // draw the quad
@@ -418,6 +428,8 @@ void MandelGLWidget::paintGL()
 
     //render the mandelbrot image ends
     postEffectProgram->release();
+
+#ifdef SHOW_HUD
 
     // build the HUG message
 
@@ -434,12 +446,17 @@ void MandelGLWidget::paintGL()
     QString tempStr;
 
     //shader paremters
-    hudMessage += "\nIters: ";
-    tempStr.setNum(maxInterations, 'f', 0);
+
+    hudMessage += "\nZoom: ";
+    tempStr.setNum(scaleFactor, 'f', 2);
     hudMessage += tempStr;
 
     hudMessage += "\nRot: ";
     tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 2);
+    hudMessage += tempStr;
+
+    hudMessage += "\nIters: ";
+    tempStr.setNum(maxInterations, 'f', 0);
     hudMessage += tempStr;
 
     // reset the time every 100 frames
@@ -454,7 +471,8 @@ void MandelGLWidget::paintGL()
 
     textPainter->begin(this);
     DrawHUD();
-    textPainter->end();    
+    textPainter->end();
+#endif
 
 
     swapBuffers();
@@ -475,7 +493,7 @@ void MandelGLWidget::DrawHUD()
     textPainter->setRenderHint(QPainter::TextAntialiasing);
     textPainter->setPen(Qt::white);
     textPainter->fillRect(hudRect, QColor(0, 0, 0, 127));
-    textPainter->drawText(hudRect, Qt::AlignCenter, hudMessage);
+    textPainter->drawText(hudRect, Qt::AlignLeft, hudMessage);
 }
 
 void MandelGLWidget::ComputeHUDRect()

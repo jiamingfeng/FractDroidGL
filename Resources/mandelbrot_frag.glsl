@@ -27,16 +27,23 @@
 
 uniform sampler2D lookUpTexture;
 uniform mediump float maxIterations;
-//uniform mediump vec2 center;
 
-varying highp vec2 TexCoord;
+uniform highp double rotRadian;    //rotation in radian
+uniform highp dvec2 rotatePivot;
+uniform highp dvec2 center;
+
+varying mediump vec2 TexCoord;
 
 void main (void)
 {
     highp dvec2 c;
+    highp dvec2 TexCoordMod;
 
-    c.x = double(TexCoord.x);// + double(center.x);
-    c.y = double(TexCoord.y);// + double(center.y);
+    TexCoordMod.x = double(TexCoord.x) - rotatePivot.x + center.x;
+    TexCoordMod.y = double(TexCoord.y) - rotatePivot.y + center.y;
+
+    c.x = TexCoordMod.x * cos(rotRadian) - TexCoordMod.y * sin(rotRadian) + rotatePivot.x;
+    c.y = TexCoordMod.y * cos(rotRadian) + TexCoordMod.x * sin(rotRadian) + rotatePivot.y;
 
     mediump vec3 color = texture2D(lookUpTexture, vec2(1.0, 0.0)).bgr;
     
