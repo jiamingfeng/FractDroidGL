@@ -25,6 +25,7 @@ uniform mediump mat4 MVP; // model-view-project matrix
 attribute mediump vec2 Position;
 attribute mediump vec2 InTexCoord;
 uniform mediump float scale;
+uniform mediump vec2 resolution;    //use to keep the proportion of mandelbrot set
 //===============END=====================================
 
 uniform mediump vec2 TexCoordoffset;
@@ -38,27 +39,25 @@ void main(void)
     gl_Position = MVP * vec4(Position, 0.0, 1.0);
 
     // scale the uv from [0, 1] to [-0.5, 0.5], scale it and add the texture coordinate offset
-    // translate  -(rotation center)
+    // translate  -(rotation center) e.g. (0.5, 0.5)
     // rotate the coordinates
-    // translate  (rotation center)
+    // translate  (rotation center) e.g. (0.5, 0.5)
 
     //(InTexCoord - 0.5) / scale  + 0.5 - TexCoordoffset - 0.5;
-    mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale + 0.5 - TexCoordoffset;
+    mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale - TexCoordoffset;
 
-    TexCoordOrig -= 0.5;
+    // keept the width/height scale while rotating
+    mediump float stScale = resolution.x / resolution.y;
 
-    // if the rotation angle is smaller than 0.5 degree
-    // ignore the rotation
-    //if (abs(RotationOffset) > 0.00872664626)
-    //{
+    TexCoordOrig.x *= stScale;
+
     TexCoord.x = TexCoordOrig.x * cos(-RotationOffset) - TexCoordOrig.y * sin(-RotationOffset);
     TexCoord.y = TexCoordOrig.y * cos(-RotationOffset) + TexCoordOrig.x * sin(-RotationOffset);
-    //}
-    //else
-    //{
-    //    TexCoord = TexCoordOrig;
-    //}
+
+    TexCoord.x /= stScale;
 
     TexCoord += 0.5;
+
+
 
 }

@@ -78,6 +78,7 @@ protected:
 #endif
     // devices with keyboard only
     void keyPressEvent(QKeyEvent *event);
+    void keyReleaseEvent(QKeyEvent * event);
 
     // handel the gesture events
     bool event(QEvent *event);
@@ -89,10 +90,13 @@ protected:
 private:
     // update center position of the mandelbrot
     void UpdateMandelbrotCenter(QPointF& pixelOffset);
+
+    //TODO:: currently, the rotation pivot is set as mandelbrot center point by default
+    //       need to get the rotation pivot by reading the gesture center point
     void UpdateRotationPivot(/*int screenX, int screenY*/);
     void UpdateProjectedScales();
     void DrawHUD();
-    void ComputeHUDRect(bool forceUpdate = false);
+    void ComputeHUDRect();
 
 
 private:
@@ -138,6 +142,7 @@ private:
     GLint texCoodOffsetLoc;
     GLint rotationOffsetLoc;
     GLint imagescaleUniformLoc;
+    GLint imageResolutionLoc;
     GLint fboTextureLoc;
 
 
@@ -176,6 +181,7 @@ private:
     int frames;
     QTime fpsTime;
     QPainter* textPainter;
+    bool isHUDDirty;
 
     // threads
     //QThread swapBufferThread;
