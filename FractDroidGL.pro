@@ -25,6 +25,7 @@ OTHER_FILES += \
     android/src/org/kde/necessitas/origo/QtActivity.java \
     android/src/org/kde/necessitas/origo/QtApplication.java \
     android/AndroidManifest.xml \
+    android/res/drawable/icon.png \
     android/res/drawable-mdpi/icon.png \
     android/res/drawable-xhdpi/icon.png \
     android/res/values/libs.xml \
