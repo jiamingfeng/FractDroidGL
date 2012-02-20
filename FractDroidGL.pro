@@ -26,6 +26,7 @@ OTHER_FILES += \
     android/src/org/kde/necessitas/origo/QtApplication.java \
     android/AndroidManifest.xml \
     android/res/drawable-mdpi/icon.png \
+    android/res/drawable-xhdpi/icon.png \
     android/res/values/libs.xml \
     android/res/values/strings.xml \
     android/res/values-it/strings.xml \
@@ -41,8 +42,6 @@ OTHER_FILES += \
     android/res/values-nb/strings.xml \
     android/res/values-nl/strings.xml \
     android/res/values-ja/strings.xml \
-    android/res/drawable/logo.png \
-    android/res/drawable/icon.png \
     android/res/values-rs/strings.xml \
     android/res/values-es/strings.xml \
     android/res/values-pl/strings.xml \
@@ -50,14 +49,15 @@ OTHER_FILES += \
     android/res/values-fr/strings.xml \
     android/res/values-pt-rBR/strings.xml \
     android/res/values-el/strings.xml \
-    android/res/layout/splash.xml \
     android/res/drawable-hdpi/icon.png \
     Resources/lookup.png \
     Resources/vert.glsl \
     Resources/mandelbrot_vert.glsl \
     Resources/mandelbrot_frag.glsl \
     Resources/frag.glsl \
-    Resources/logo.png
+
+
+
 
 
 

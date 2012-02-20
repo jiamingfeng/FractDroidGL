@@ -29,6 +29,8 @@
 
 #define SHOW_HUD
 
+//#define SHOW_DEBUG_HUD
+
 // updates only when user interact with the mandelbrot set
 //#define INTERACTIVE_UPDATES_ONLY
 
@@ -456,13 +458,17 @@ void MandelGLWidget::paintGL()
         tempStr.setNum(scaleFactor, 'f', 2);
         hudMessage += tempStr;
 
-        hudMessage += "\nRot: ";
-        tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 2);
+        hudMessage += "\nRotation: ";
+        tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 1);
         hudMessage += tempStr;
+
+#ifdef SHOW_DEBUG_HUD
 
         hudMessage += "\nIters: ";
         tempStr.setNum(maxInterations, 'f', 0);
         hudMessage += tempStr;
+
+#endif
 
         // reset the time every 100 frames
         if (!(frames % 100))
