@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
 	QApplication a(argc, argv);
 
     MandelGLWidget w;
-#if !defined (QT_OPENGL_ES_2)
+#if !defined (Q_OS_ANDROID)
     w.resize(1280, 720);
     w.show();
 #else

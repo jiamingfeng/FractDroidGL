@@ -17,6 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 #include "MandelGLWidget.h"
 #include <QtOpenGL/QtOpenGL>
 #include <QtCore/qmath.h>
@@ -44,7 +45,7 @@ const GLushort quad_indices[] = {0,1,2, 2,3,0};
 const float ZOOM_STEP = 1.2f;           // zoom step for pin zoom
 const float INTERATION_STEP = 1.06f;    // interaction change step
 
-const float PIN_ROTATE_THRESHOLD = 0.2f;   // pin rotate threhold in degree
+const float PIN_ROTATE_THRESHOLD = 0.05f;   // pin rotate threhold in degree
 
 const float RADIAN_TO_DEGREE = 57.295779513082320876798154814105f; // 180 / PI
 const float DEGREE_TO_RADIAN = 0.01745329251994329576923690768489f; // PI / 180
@@ -94,6 +95,7 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     textPainter = 0;
     messageLength = 0;
     isHUDDirty = true;
+    showHUD = true;
 
     UpdateProjectedScales();
 
@@ -113,6 +115,8 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     // enable gesture events
     //grabGesture(Qt::PanGesture);
     grabGesture(Qt::PinchGesture);
+    //grabGesture(Qt::TapGesture);
+    //grabGesture(Qt::TapAndHoldGesture);
 
     currentGesture = MandelGLWidget::NONE;
 }
@@ -429,50 +433,51 @@ void MandelGLWidget::paintGL()
     //render the mandelbrot image ends
     postEffectProgram->release();
 
-#ifdef SHOW_HUD
-
-    // build the HUG message
-
-    hudMessage = "Fps: ";
-
-    // update the fps message every 20 frames
-    if (!(frames % 20))
+    if ( showHUD )
     {
-        // calculate fps
-        strFps.setNum(frames * 1000.0 / fpsTime.elapsed(), 'f', 2);
+
+        // build the HUG message
+
+        hudMessage = "Fps: ";
+
+        // update the fps message every 20 frames
+        if (!(frames % 20))
+        {
+            // calculate fps
+            strFps.setNum(frames * 1000.0 / fpsTime.elapsed(), 'f', 2);
+        }
+        hudMessage += strFps;
+
+        QString tempStr;
+
+        //shader paremters
+
+        hudMessage += "\nZoom: ";
+        tempStr.setNum(scaleFactor, 'f', 2);
+        hudMessage += tempStr;
+
+        hudMessage += "\nRot: ";
+        tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 2);
+        hudMessage += tempStr;
+
+        hudMessage += "\nIters: ";
+        tempStr.setNum(maxInterations, 'f', 0);
+        hudMessage += tempStr;
+
+        // reset the time every 100 frames
+        if (!(frames % 100))
+        {
+            fpsTime.start();
+            frames = 0;
+        }
+        frames ++;
+
+        //draw fps
+
+        textPainter->begin(this);
+        DrawHUD();
+        textPainter->end();
     }
-    hudMessage += strFps;
-
-    QString tempStr;
-
-    //shader paremters
-
-    hudMessage += "\nZoom: ";
-    tempStr.setNum(scaleFactor, 'f', 2);
-    hudMessage += tempStr;
-
-    hudMessage += "\nRot: ";
-    tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 2);
-    hudMessage += tempStr;
-
-    hudMessage += "\nIters: ";
-    tempStr.setNum(maxInterations, 'f', 0);
-    hudMessage += tempStr;
-
-    // reset the time every 100 frames
-    if (!(frames % 100))
-    {
-        fpsTime.start();
-        frames = 0;
-    }
-    frames ++;
-
-    //draw fps
-
-    textPainter->begin(this);
-    DrawHUD();
-    textPainter->end();
-#endif
 
 
     swapBuffers();
@@ -515,7 +520,7 @@ void MandelGLWidget::ComputeHUDRect()
 }
 
 // events
-#if !defined (QT_OPENGL_ES_2)
+#if !defined (Q_OS_ANDROID)
 void MandelGLWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
@@ -621,6 +626,9 @@ void MandelGLWidget::keyReleaseEvent(QKeyEvent *event)
 
 bool MandelGLWidget::event(QEvent *event)
 {
+    if (event->type() == QEvent::Gesture)
+        return gestureEvent(static_cast<QGestureEvent*>(event));
+
     if (event->type() == QEvent::TouchBegin  ||
         event->type() == QEvent::TouchUpdate ||
         event->type() == QEvent::TouchEnd    )
@@ -668,9 +676,6 @@ bool MandelGLWidget::event(QEvent *event)
 
     }
 
-    else if (event->type() == QEvent::Gesture)
-        return gestureEvent(static_cast<QGestureEvent*>(event));
-
     return QGLWidget::event(event);
 }
 
@@ -680,6 +685,8 @@ bool MandelGLWidget::gestureEvent(QGestureEvent *event)
 
 //    if (QGesture *pan = event->gesture(Qt::PanGesture))
 //        handelPanGesture(static_cast<QPanGesture *>(pan));
+    if (QGesture *hold = event->gesture(Qt::TapAndHoldGesture))
+        handelTapAndHoldGesture(static_cast<QTapAndHoldGesture *>(hold));
 
     if (QGesture *pinch = event->gesture(Qt::PinchGesture))
         handelPinchGesture(static_cast<QPinchGesture *>(pinch));
@@ -815,11 +822,18 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
 
 }
 
+void MandelGLWidget::handelTapAndHoldGesture(QTapAndHoldGesture *gesture)
+{
+    Q_UNUSED(gesture);
+    // change the visibility of HUD display
+    showHUD = !showHUD;
+}
+
 void MandelGLWidget::UpdateMandelbrotCenter(QPointF& pixelOffset)
 {
 
     //rotate the movement offset according to current rotation in mobile platform
-#if defined (QT_OPENGL_ES_2)
+#if defined (Q_OS_ANDROID)
     QPointF rotatedOffset( pixelOffset.x() * cos(-rotation) - pixelOffset.y() * sin(-rotation),
                            pixelOffset.y() * cos(-rotation) + pixelOffset.x() * sin(-rotation));
 #else

@@ -36,6 +36,8 @@ QT_BEGIN_NAMESPACE
     class QGestureEvent;
     class QPanGesture;
     class QPinchGesture;
+    class QTapAndHoldGesture;
+    class QTapGesture;
 QT_END_NAMESPACE
 
 class BufferSwapWorker;
@@ -70,7 +72,7 @@ protected:
 	void resizeGL(int width, int height);
     void paintGL();
 
-#if !defined (QT_OPENGL_ES_2)
+#if !defined (Q_OS_ANDROID)
     // mouse events
     void mousePressEvent(QMouseEvent *event);
     void mouseMoveEvent(QMouseEvent *event);
@@ -85,6 +87,7 @@ protected:
     bool gestureEvent(QGestureEvent *event);
     void handelPanGesture(QPanGesture *gesture);
     void handelPinchGesture(QPinchGesture *gesture);
+    void handelTapAndHoldGesture(QTapAndHoldGesture *gesture);
 
 
 private:
@@ -190,6 +193,7 @@ private:
     QTime fpsTime;
     QPainter* textPainter;
     bool isHUDDirty;
+    bool showHUD;
 
 };
 
