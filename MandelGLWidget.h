@@ -96,7 +96,7 @@ private:
 
     //TODO:: currently, the rotation pivot is set as mandelbrot center point by default
     //       need to get the rotation pivot by reading the gesture center point
-    void UpdateRotationPivot(/*int screenX, int screenY*/);
+    void UpdateRotationPivot();
     void UpdateProjectedScales();
     void DrawHUD();
     void ComputeHUDRect();
@@ -108,6 +108,8 @@ private:
 	QGLShaderProgram* mandelProgram;
 
     QGLShaderProgram* postEffectProgram;
+
+    bool passCompiled;
 
     // frame buffer object
     QGLFramebufferObject* fbo;
@@ -147,8 +149,9 @@ private:
     GLint scalePostLoc;             //scale
     GLint resPostLoc;               //resolution
 
-    GLint texCoodOffsetLoc;         //TexCoordoffset
-    GLint rotationOffsetLoc;        //RotationOffset
+    GLint texCoodOffsetLoc;         //translation
+    GLint rotationOffsetLoc;        //rotation
+    GLint rotationPivotLoc;         //rotationPivot
     GLint fboTextureLoc;            //fbo
 
 
@@ -167,8 +170,10 @@ private:
     QPointF projectedScaleFactor;
 
     // rotation of current view
-    float rotation; //rotation in radian
-    QVector2D rotationPivot;
+    float rotation;             //rotation in radian
+    QVector2D rotationPivot;    //rotationPivot for mandelbrot shader
+    QVector2D rotationPivotSS;  //screen-space rotation pivot (post effect shader)
+    QPointF screenPivot;        //rotation pivot in screen coordinate
 
     float maxInterations;
 

@@ -45,7 +45,9 @@ const GLushort quad_indices[] = {0,1,2, 2,3,0};
 
 
 const float ZOOM_STEP = 1.2f;           // zoom step for pin zoom
-const float INTERATION_STEP = 1.06f;    // interaction change step
+const float INTERATION_STEP = 1.012f;    // interaction change step
+const float AUTO_INTERATION_FACTOR = INTERATION_STEP / ZOOM_STEP;
+const float MAX_ONE_SHOT_ZOOM = 50.0f;
 
 const float PIN_ROTATE_THRESHOLD = 0.05f;   // pin rotate threhold in degree
 
@@ -62,6 +64,7 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     projectMat.setToIdentity();
 
     shaderErrors = "";
+    passCompiled = false;
 
     mvpFractLoc     = 0;
     posFractLoc     = 0;
@@ -121,6 +124,13 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     //grabGesture(Qt::TapAndHoldGesture);
 
     currentGesture = MandelGLWidget::NONE;
+
+    // change the smaller font in mobile devices
+#ifdef Q_OS_ANDROID
+    QFont currentFont = font();
+    currentFont.setPointSizeF(7.0);
+    setFont(currentFont);
+#endif
 }
 
 MandelGLWidget::~MandelGLWidget()
@@ -185,31 +195,26 @@ void MandelGLWidget::initializeGL()
 
     // add vertex and fragment shaders for mandelbrot program
     QGLShader mandelbrotVertexShader(QGLShader::Vertex, context());
-    bool isCompiled = mandelbrotVertexShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_vert.glsl");
+    passCompiled = mandelbrotVertexShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_vert.glsl");
 
-    if( isCompiled == false)
+    if( passCompiled == false )
     {
         shaderErrors = mandelbrotVertexShader.log();
     }
 
     QGLShader mandelbrotFragShader(QGLShader::Fragment, context());
-    isCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
+    passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
 
-    if( isCompiled == false)
+    if( passCompiled == false)
     {
         shaderErrors += mandelbrotFragShader.log();
     }
 
+    //use the fallback shader instead
     if( shaderErrors.isEmpty() == false)
     {
-        QString title = "Shader compile errors";
-        QMessageBox msgBox(this);
-        msgBox.setWindowTitle(title);
-        msgBox.setText(shaderErrors);
-        msgBox.setStandardButtons(QMessageBox::Ok);
-        msgBox.exec();
-
-        this->close();
+        passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag_fallback.glsl");
+        shaderErrors = "";
     }
 
     mandelProgram->addShader(&mandelbrotVertexShader);
@@ -235,30 +240,29 @@ void MandelGLWidget::initializeGL()
 
     // add vertex and fragment shaders for post effect program
     QGLShader vertexShader(QGLShader::Vertex, context());
-    isCompiled = vertexShader.compileSourceFile(":/FractDroidGL/Resources/vert.glsl");
+    passCompiled = vertexShader.compileSourceFile(":/FractDroidGL/Resources/vert.glsl");
 
-    if( isCompiled == false)
+    if( passCompiled == false)
     {
         shaderErrors = vertexShader.log();
     }
 
     QGLShader fragShader(QGLShader::Fragment, context());
-    isCompiled = fragShader.compileSourceFile(":/FractDroidGL/Resources/frag.glsl");
+    passCompiled = fragShader.compileSourceFile(":/FractDroidGL/Resources/frag.glsl");
 
-    if( isCompiled == false)
+    if( passCompiled == false)
     {
         shaderErrors += fragShader.log();
     }
 
     if( shaderErrors.isEmpty() == false)
     {
-        QString title = "Shader compile errors";
+        QString title = "Please report the following errors to developer, thank you";
         QMessageBox msgBox(this);
         msgBox.setWindowTitle(title);
         msgBox.setText(shaderErrors);
         msgBox.setStandardButtons(QMessageBox::Ok);
         msgBox.exec();
-
         this->close();
     }
 
@@ -274,8 +278,9 @@ void MandelGLWidget::initializeGL()
     scalePostLoc = postEffectProgram->uniformLocation("scale");
     resPostLoc = postEffectProgram->uniformLocation("resolution");
 
-    texCoodOffsetLoc = postEffectProgram->uniformLocation("TexCoordoffset");
-    rotationOffsetLoc = postEffectProgram->uniformLocation("RotationOffset");
+    texCoodOffsetLoc = postEffectProgram->uniformLocation("translation");
+    rotationOffsetLoc = postEffectProgram->uniformLocation("rotation");
+    rotationPivotLoc = postEffectProgram->uniformLocation("rotationPivot");
     fboTextureLoc = postEffectProgram->uniformLocation("fboTexture");
 
     //postEffectProgram->enableAttributeArray(posAttrLoc);
@@ -300,12 +305,11 @@ void MandelGLWidget::initializeGL()
     renderLoopTimer->start();
 #endif
 
-    resizeGL(width(), height());
-
 }
 
 void MandelGLWidget::resizeGL(int width, int height)
 {
+
     // setup viewport
     glViewport(0, 0, (GLint)width, (GLint)height);
 
@@ -374,7 +378,7 @@ void MandelGLWidget::paintGL()
         mandelProgram->setUniformValue(resFractLoc, QVector2D(float(width()), float(height())));
         mandelProgram->setUniformValue(rotFractLoc, rotation);
         mandelProgram->setUniformValue(rotPivotFractLoc, rotationPivot);
-        mandelProgram->setUniformValue(iterFractLoc, maxInterations);
+        mandelProgram->setUniformValue(iterFractLoc, int(maxInterations + 0.5f));
         mandelProgram->setUniformValue(centerFractLoc, centerPos);
         mandelProgram->setUniformValue(lookupTextureLoc, 0);
 
@@ -397,6 +401,8 @@ void MandelGLWidget::paintGL()
         textCoordOffset.setX(0);
         textCoordOffset.setY(0);
         rotationOffset = 0.0f;
+        rotationPivotSS.setX(0);
+        rotationPivotSS.setY(0);
         imageScale = 1.0f;
     }
 
@@ -422,6 +428,7 @@ void MandelGLWidget::paintGL()
 
     postEffectProgram->setUniformValue( texCoodOffsetLoc, textCoordOffset);
     postEffectProgram->setUniformValue( rotationOffsetLoc, rotationOffset);
+    postEffectProgram->setUniformValue( rotationPivotLoc, rotationPivotSS);
     postEffectProgram->setUniformValue( fboTextureLoc, 0);
 
     // draw the quad
@@ -465,7 +472,7 @@ void MandelGLWidget::paintGL()
 #ifdef SHOW_DEBUG_HUD
 
         hudMessage += "\nIters: ";
-        tempStr.setNum(maxInterations, 'f', 0);
+        tempStr.setNum(int(maxInterations));
         hudMessage += tempStr;
 
 #endif
@@ -511,6 +518,7 @@ void MandelGLWidget::ComputeHUDRect()
 {
     if( messageLength == 0 || messageLength != hudMessage.length() || isHUDDirty)
     {
+
         QFontMetrics metrics(font());
         int border = qMax(4, metrics.leading());
 
@@ -535,6 +543,7 @@ void MandelGLWidget::mousePressEvent(QMouseEvent *event)
 
         //stop the mandelbrot rendering
         renderMandelbrot = false;
+
     }
 }
 
@@ -547,10 +556,6 @@ void MandelGLWidget::mouseMoveEvent(QMouseEvent *event)
 
         //update shader position
         UpdateMandelbrotCenter(pixelOffset);
-
-        //pan the current texture
-        textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
-        textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
     }
 }
 
@@ -561,6 +566,8 @@ void MandelGLWidget::mouseReleaseEvent(QMouseEvent *event)
     renderMandelbrot = true;
     textCoordOffset.setX(0);
     textCoordOffset.setY(0);
+
+    screenPivot = event->posF();
 }
 
 #endif
@@ -574,14 +581,14 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
     // zoom in
     case Qt::Key_Z:
         scaleFactor *= 1.2f;
-        maxInterations *= 1.02f;
+        maxInterations *= 1.06f;
 
         renderMandelbrot = true;
         break;
     // zoom out
     case Qt::Key_X:
-        scaleFactor *= 0.8f;
-        maxInterations /= 1.02f;
+        scaleFactor /= 1.2f;
+        maxInterations /= 1.06f;
 
         renderMandelbrot = true;
         break;
@@ -591,7 +598,7 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
         rotation += 5.0f * DEGREE_TO_RADIAN;
         rotationOffset += 5.0f * DEGREE_TO_RADIAN;
         UpdateRotationPivot();
-        renderMandelbrot = false;
+        //renderMandelbrot = false;
         break;
 
     // rotate 5 degree clockwise
@@ -599,7 +606,7 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
         rotation -= 5.0f * DEGREE_TO_RADIAN;
         rotationOffset -= 5.0f * DEGREE_TO_RADIAN;
         UpdateRotationPivot();
-        renderMandelbrot = false;
+        //renderMandelbrot = false;
         break;
 
     case Qt::Key_Escape:
@@ -663,12 +670,6 @@ bool MandelGLWidget::event(QEvent *event)
                 lastDragPos = touchPoint0.pos();
 
                 UpdateMandelbrotCenter(pixelOffset);
-
-                UpdateRotationPivot();
-
-                //pan the current texture
-                textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
-                textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
             }
             else if ( touchEvent->touchPointStates() & Qt::TouchPointReleased )
             {
@@ -720,12 +721,6 @@ void MandelGLWidget::handelPanGesture(QPanGesture *gesture)
         QPointF pixelOffset = gesture->delta();
 
         UpdateMandelbrotCenter(pixelOffset);
-
-        UpdateRotationPivot();
-
-        //pan the current texture
-        textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / width() );
-        textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / height() );
     }
         break;
 
@@ -749,6 +744,8 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
     switch (gesture->state())
     {
     case Qt::GestureStarted:
+        screenPivot = gesture->centerPoint();
+
         //stop the mandelbrot rendering
         renderMandelbrot = false;
         break;
@@ -795,17 +792,32 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
             currentScaleFactor = 1.0f;
 
             // update the interation according to the zoom level
+
             float scaleLevel = scaleFactor / previousScale;
-            if( scaleLevel > ZOOM_STEP )
+            if( scaleLevel > 1.0 )
             {
-                maxInterations *= INTERATION_STEP;
-                previousScale = scaleFactor;
+                maxInterations *= INTERATION_STEP ;
             }
-            else if ( scaleLevel  < 1.0f / ZOOM_STEP )
+            else
             {
-                maxInterations /= INTERATION_STEP;
-                previousScale = scaleFactor;
+                maxInterations /= INTERATION_STEP ;
             }
+
+            previousScale = scaleFactor;
+
+            // update the zoom pivot
+            QPointF pivotOffset;
+            if ( changeFlags & QPinchGesture::CenterPointChanged )
+            {
+                pivotOffset = gesture->centerPoint() - gesture->lastCenterPoint();
+            }
+            //newPivot = p0 + (p1 - p0 ) t  [t | t > 0 && t < 1]
+            //pivotOffset = (QPointF(width()/2.0f, height()/2.0f) - screenPivot) * scaleLevel / MAX_ONE_SHOT_ZOOM;
+
+
+            UpdateMandelbrotCenter(pivotOffset);
+
+
 
             currentGesture = MandelGLWidget::PIN_ZOOM;
         }
@@ -852,15 +864,30 @@ void MandelGLWidget::UpdateMandelbrotCenter(QPointF& pixelOffset)
 
     centerPos.setX(centerX);
     centerPos.setY(centerY);
+
+    // update rotation pivot
+    UpdateRotationPivot();
+
+    //pan the current texture
+    textCoordOffset.setX(textCoordOffset.x() + pixelOffset.x() / float(width()) );
+    textCoordOffset.setY(textCoordOffset.y() + pixelOffset.y() / float(height()) );
+
 }
 
 
-void MandelGLWidget::UpdateRotationPivot(/*int screenX, int screenY*/)
+void MandelGLWidget::UpdateRotationPivot()
 {
-    //rotationPivot.setX((float(screenX) - float(width())/2.0) * projectedScaleFactor.x() / scaleFactor + centerPos.x());// - centerPos.x());
-    //rotationPivot.setY((float(screenY) - float(height())/2.0) * projectedScaleFactor.y() / scaleFactor + centerPos.y());// - centerPos.y());
-    rotationPivot = centerPos;
+//    float fWidth = float(width());
+//    float fHeight = float(height());
+//    float stScale = fWidth / fHeight;
+//    rotationPivot.setX( stScale * (4.0f * screenPivot.x() / fWidth - 2.0f) + centerPos.x()); // 2* (x - w/2) / w/2 + c.x
+//    rotationPivot.setY(2.0f - 4.0 * screenPivot.y() / fHeight + centerPos.y());              // 2* ((h - y) - h/2) / (h/2) + c.y
 
+//    rotationPivotSS.setX(screenPivot.x()/fWidth);
+//    rotationPivotSS.setY(screenPivot.y()/fHeight);
+    rotationPivot = centerPos;
+    rotationPivotSS.setX(0.5f);
+    rotationPivotSS.setY(0.5f);
 }
 
 void MandelGLWidget::UpdateProjectedScales()

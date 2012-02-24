@@ -56,6 +56,8 @@ OTHER_FILES += \
     Resources/mandelbrot_vert.glsl \
     Resources/mandelbrot_frag.glsl \
     Resources/frag.glsl \
+    Resources/mandelbrot_frag_fallback.glsl
+
 
 
 
