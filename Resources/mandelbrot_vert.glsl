@@ -25,7 +25,7 @@ uniform mediump mat4 MVP; // model-view-project matrix
 attribute mediump vec2 Position;
 attribute mediump vec2 InTexCoord;
 uniform mediump float scale;        //zoom factor
-uniform mediump vec2 resolution;    //use to keep the proportion of mandelbrot set
+uniform lowp float whScale;    //use to keep the proportion of mandelbrot set
 //===============END=====================================
 
 
@@ -41,10 +41,8 @@ void main(void)
     // rotate the coordinates
     // translate  (rotation center) e.g. (0.5, 0.5)
 
-    mediump float stScale = resolution.x / resolution.y;
-
     mediump vec2 scaledTexCoord;
-    scaledTexCoord.x = (InTexCoord.x -0.5) * stScale;
+    scaledTexCoord.x = (InTexCoord.x -0.5) * whScale;
     scaledTexCoord.y = InTexCoord.y - 0.5;
 
     TexCoord = scaledTexCoord * 4.0 / scale ;

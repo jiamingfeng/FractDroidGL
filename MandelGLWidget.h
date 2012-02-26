@@ -182,6 +182,8 @@ private:
     float rotationOffset;
     float imageScale;
 
+    float whScale;
+
     // whether to render a new frame of mandelbrot
     bool renderMandelbrot;
 

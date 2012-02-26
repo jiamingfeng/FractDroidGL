@@ -32,7 +32,7 @@
 uniform sampler2D lookUpTexture;
 uniform int maxIterations;
 
-uniform highp double rotRadian;    //rotation in radian
+uniform mediump float rotRadian;    //rotation in radian
 uniform highp dvec2 rotatePivot;
 uniform highp dvec2 center;
 

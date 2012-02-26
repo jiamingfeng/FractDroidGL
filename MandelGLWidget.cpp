@@ -29,7 +29,7 @@
 
 #define SHOW_HUD
 
-//#define SHOW_DEBUG_HUD
+#define SHOW_DEBUG_HUD
 
 // updates only when user interact with the mandelbrot set
 //#define INTERACTIVE_UPDATES_ONLY
@@ -45,7 +45,7 @@ const GLushort quad_indices[] = {0,1,2, 2,3,0};
 
 
 const float ZOOM_STEP = 1.2f;           // zoom step for pin zoom
-const float INTERATION_STEP = 1.012f;    // interaction change step
+const float INTERATION_STEP = 1.06f;    // interaction change step
 const float AUTO_INTERATION_FACTOR = INTERATION_STEP / ZOOM_STEP;
 const float MAX_ONE_SHOT_ZOOM = 50.0f;
 
@@ -114,6 +114,7 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     imageScale = 1.0f;
     renderMandelbrot = true;
 
+#ifdef Q_OS_ANDROID
     // turn of touch events
     setAttribute(Qt::WA_AcceptTouchEvents);
 
@@ -123,14 +124,13 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     //grabGesture(Qt::TapGesture);
     //grabGesture(Qt::TapAndHoldGesture);
 
-    currentGesture = MandelGLWidget::NONE;
-
     // change the smaller font in mobile devices
-#ifdef Q_OS_ANDROID
     QFont currentFont = font();
     currentFont.setPointSizeF(7.0);
     setFont(currentFont);
 #endif
+
+    currentGesture = MandelGLWidget::NONE;
 }
 
 MandelGLWidget::~MandelGLWidget()
@@ -228,7 +228,7 @@ void MandelGLWidget::initializeGL()
     posFractLoc  = mandelProgram->attributeLocation("Position");
     uvFractLoc   = mandelProgram->attributeLocation("InTexCoord");
     scaleFractLoc = mandelProgram->uniformLocation("scale");
-    resFractLoc = mandelProgram->uniformLocation("resolution");
+    resFractLoc = mandelProgram->uniformLocation("whScale");
     rotFractLoc = mandelProgram->uniformLocation("rotRadian");
     rotPivotFractLoc = mandelProgram->uniformLocation("rotatePivot");
     iterFractLoc = mandelProgram->uniformLocation("maxIterations");
@@ -276,7 +276,7 @@ void MandelGLWidget::initializeGL()
     posPostLoc  = postEffectProgram->attributeLocation("Position");
     uvPostLoc   = postEffectProgram->attributeLocation("InTexCoord");
     scalePostLoc = postEffectProgram->uniformLocation("scale");
-    resPostLoc = postEffectProgram->uniformLocation("resolution");
+    resPostLoc = postEffectProgram->uniformLocation("whScale");
 
     texCoodOffsetLoc = postEffectProgram->uniformLocation("translation");
     rotationOffsetLoc = postEffectProgram->uniformLocation("rotation");
@@ -323,6 +323,8 @@ void MandelGLWidget::resizeGL(int width, int height)
     // QMatrix4x4 model;
     // model.setToIdentity();
     // modelViewProjection = modelViewProjection * view * model;
+
+    whScale = float(width) / float(height);
 
 
     // reset the projection matrix
@@ -373,9 +375,9 @@ void MandelGLWidget::paintGL()
         mandelProgram->setAttributeArray(uvFractLoc, quad_uvs, 2 );
 
         //shader's parameters
-        mandelProgram->setUniformValue( mvpFractLoc, modelViewProjection );
+        mandelProgram->setUniformValue(mvpFractLoc, modelViewProjection );
         mandelProgram->setUniformValue(scaleFractLoc, scaleFactor);
-        mandelProgram->setUniformValue(resFractLoc, QVector2D(float(width()), float(height())));
+        mandelProgram->setUniformValue(resFractLoc, whScale);
         mandelProgram->setUniformValue(rotFractLoc, rotation);
         mandelProgram->setUniformValue(rotPivotFractLoc, rotationPivot);
         mandelProgram->setUniformValue(iterFractLoc, int(maxInterations + 0.5f));
@@ -424,7 +426,7 @@ void MandelGLWidget::paintGL()
     //vertex shader uniforms
     postEffectProgram->setUniformValue( mvpPostLoc, projectMat );
     postEffectProgram->setUniformValue( scalePostLoc, imageScale );
-    postEffectProgram->setUniformValue( resPostLoc,  QVector2D(float(width()), float(height())));
+    postEffectProgram->setUniformValue( resPostLoc,  whScale);
 
     postEffectProgram->setUniformValue( texCoodOffsetLoc, textCoordOffset);
     postEffectProgram->setUniformValue( rotationOffsetLoc, rotationOffset);
@@ -564,10 +566,9 @@ void MandelGLWidget::mouseReleaseEvent(QMouseEvent *event)
     Q_UNUSED(event);
     // resume the rendering after mouse released
     renderMandelbrot = true;
-    textCoordOffset.setX(0);
-    textCoordOffset.setY(0);
-
-    screenPivot = event->posF();
+//    textCoordOffset.setX(0);
+//    textCoordOffset.setY(0);
+//    screenPivot = event->posF();
 }
 
 #endif
@@ -794,16 +795,16 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
             // update the interation according to the zoom level
 
             float scaleLevel = scaleFactor / previousScale;
-            if( scaleLevel > 1.0 )
+            if( scaleLevel > ZOOM_STEP )
             {
-                maxInterations *= INTERATION_STEP ;
+                maxInterations *= INTERATION_STEP;
+                previousScale = scaleFactor;
             }
-            else
+            else if ( scaleLevel  < 1.0f / ZOOM_STEP )
             {
-                maxInterations /= INTERATION_STEP ;
+                maxInterations /= INTERATION_STEP;
+                previousScale = scaleFactor;
             }
-
-            previousScale = scaleFactor;
 
             // update the zoom pivot
             QPointF pivotOffset;
@@ -859,11 +860,8 @@ void MandelGLWidget::UpdateMandelbrotCenter(QPointF& pixelOffset)
 #endif
 
     // remap the pixel offset from [0, width][0, height] to [-2, 1][-1, 1]
-    qreal centerX = centerPos.x() + rotatedOffset.x() * projectedScaleFactor.x() / scaleFactor;
-    qreal centerY = centerPos.y() + rotatedOffset.y() * projectedScaleFactor.y() / scaleFactor;
-
-    centerPos.setX(centerX);
-    centerPos.setY(centerY);
+    centerPos.setX(centerPos.x() + rotatedOffset.x() * projectedScaleFactor.x() / scaleFactor);
+    centerPos.setY(centerPos.y() + rotatedOffset.y() * projectedScaleFactor.y() / scaleFactor);
 
     // update rotation pivot
     UpdateRotationPivot();

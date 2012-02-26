@@ -25,7 +25,7 @@ uniform mediump mat4 MVP; // model-view-project matrix
 attribute mediump vec2 Position;
 attribute mediump vec2 InTexCoord;
 uniform mediump float scale;
-uniform mediump vec2 resolution;    //use to keep the proportion of mandelbrot set
+uniform lowp float whScale;    //use to keep the proportion of mandelbrot set
 //===============END=====================================
 
 uniform mediump vec2 translation;
@@ -47,15 +47,13 @@ void main(void)
     //(InTexCoord - 0.5) / scale  + 0.5 - translation - 0.5;
     mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale + 0.5 - translation - rotationPivot;
 
-    // keept the width/height scale while rotating
-    mediump float stScale = resolution.x / resolution.y;
-
-    TexCoordOrig.x *= stScale;
+    TexCoordOrig.x *= whScale;
 
     TexCoord.x = TexCoordOrig.x * cos(-rotation) - TexCoordOrig.y * sin(-rotation);
     TexCoord.y = TexCoordOrig.y * cos(-rotation) + TexCoordOrig.x * sin(-rotation);
 
-    TexCoord.x /= stScale;
+    // keept the width/height scale while rotating
+    TexCoord.x /= whScale;
 
     TexCoord += rotationPivot;
 
