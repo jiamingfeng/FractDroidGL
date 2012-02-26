@@ -24,15 +24,22 @@
 #extension GL_ARB_gpu_shader_fp64 : enable
 #endif
 
+//#define ENABLE_PERIODICITY_CHECK
+//#define SHOW_PERIODICITY_CHECK
+
+
 
 uniform sampler2D lookUpTexture;
-uniform mediump float maxIterations;
+uniform int maxIterations;
 
 uniform highp double rotRadian;    //rotation in radian
 uniform highp dvec2 rotatePivot;
 uniform highp dvec2 center;
 
 varying mediump vec2 TexCoord;
+
+const mediump float epsilon = 1e-6;
+const mediump float log2 = log(2.0);
 
 void main (void)
 {
@@ -45,7 +52,7 @@ void main (void)
     c.x = TexCoordMod.x * cos(rotRadian) - TexCoordMod.y * sin(rotRadian) + rotatePivot.x;
     c.y = TexCoordMod.y * cos(rotRadian) + TexCoordMod.x * sin(rotRadian) + rotatePivot.y;
 
-    mediump vec3 color = texture2D(lookUpTexture, vec2(1.0, 0.0)).bgr;
+    mediump vec2 s = vec2(1.0, 0.0);
     
     // optimization. early out
 
@@ -56,32 +63,89 @@ void main (void)
     mediump double cy2 = c.y * c.y;
     mediump double q = cx * cx + cy2;
 
-    // period-2 bulb
-    // (x + 1) ^2 + y ^ 2 < 1/16
-    mediump double cxp12 = (c.x + 1.0) * (c.x + 1.0);
-
-    if ( (4.0 * q * (q + cx) > cy2) && (cxp12 + cy2 > 0.0625))
+    if ( 4.0 * q * (q + cx) >= cy2 )
     {
-        highp dvec2 z = c;
+        // period-2 bulb
+        // (x + 1) ^2 + y ^ 2 < 1/16
+        mediump double cxp12 = (c.x + 1.0) * (c.x + 1.0);
 
-        // tegra 2 CPU need to have constant loop count
-        // (e.g.  i < 64 instead of i < maxIterations)
-        mediump float i;
-
-        for ( i = 0.0; i < maxIterations && dot(z, z) < 4.0; i += 1.0)
+        if ( cxp12 + cy2 >= 0.0625 )
         {
-            z = dvec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-        }
+#ifdef ENABLE_PERIODICITY_CHECK
+            int check = 3;
+            int checkCounter = 0;
 
-        if ( i < maxIterations + 1.0 )
-        {
-            //Normalized Iteration Count to get a smoother image
-            //smooth iter = iter + ( log(log(bailout)-log(log(cabs(z))) )/log(2)
+            int update = 10;
+            int updateCounter = 0;
 
-            mediump vec2 s = vec2( (i - log(log(float(dot(z, z)))/ 2.0) / log(2.0)) / maxIterations, 0.0);
-            color = texture2D(lookUpTexture, s).bgr;
+            highp double checkPeriodicityX = 0.0;
+            highp double checkPeriodicityY = 0.0;
+
+            bool periodicityCheckFailed = false;
+
+#endif
+
+            highp dvec2 z = c;
+
+            // tegra 2 CPU need to have constant loop count
+            // (e.g.  i < 64 instead of i < maxIterations)
+            int i;
+
+            for ( i = 0; i < maxIterations && dot(z, z) < 4.0; i ++)
+            {
+                z = dvec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
+
+#ifdef ENABLE_PERIODICITY_CHECK
+
+                //periodicity check
+                if ( abs(checkPeriodicityX - z.x) < epsilon && abs(checkPeriodicityY - z.y) < epsilon)
+                {
+                    periodicityCheckFailed = true;
+                    break;
+                }
+
+                //Update history
+                if (check == checkCounter)
+                {
+                    checkCounter = 0;
+
+                    //Double the value of check
+                    if (update == updateCounter)
+                    {
+                        updateCounter = 0;
+                        check *= 2;
+                    }
+                    updateCounter++;
+
+                    checkPeriodicityX = z.x;
+                    checkPeriodicityY = z.y;
+                }
+                checkCounter++;
+#endif
+
+            }
+
+#ifdef ENABLE_PERIODICITY_CHECK
+            if ( periodicityCheckFailed == false && i < maxIterations + 1 )
+#else
+            if ( i < maxIterations + 1 )
+#endif
+            {
+                //Normalized Iteration Count to get a smoother image
+                //smooth iter = iter + ( log(log(bailout)-log(log(cabs(z))) )/log(2)
+
+                s.x = (float(i) - log(log(float(dot(z, z)))/ 2.0) / log2) / float(maxIterations);
+                //bgColor = texture2D(lookUpTexture, s).bgra;
+            }
         }
     }
 
-    gl_FragColor = vec4(color, 1.0);
+#ifdef SHOW_PERIODICITY_CHECK
+    mediump vec4 bgColor = vec4(1.0, 0.0, 1.0, 1.0);
+#else
+    mediump vec4 bgColor = texture2D(lookUpTexture, s).bgra;
+#endif
+
+
+    gl_FragColor = bgColor;
 }

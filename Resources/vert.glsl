@@ -28,8 +28,9 @@ uniform mediump float scale;
 uniform mediump vec2 resolution;    //use to keep the proportion of mandelbrot set
 //===============END=====================================
 
-uniform mediump vec2 TexCoordoffset;
-uniform mediump float RotationOffset;
+uniform mediump vec2 translation;
+uniform mediump float rotation;
+uniform mediump vec2 rotationPivot;
 
 varying mediump vec2 TexCoord;
 
@@ -43,20 +44,20 @@ void main(void)
     // rotate the coordinates
     // translate  (rotation center) e.g. (0.5, 0.5)
 
-    //(InTexCoord - 0.5) / scale  + 0.5 - TexCoordoffset - 0.5;
-    mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale - TexCoordoffset;
+    //(InTexCoord - 0.5) / scale  + 0.5 - translation - 0.5;
+    mediump vec2 TexCoordOrig = (InTexCoord - 0.5) / scale + 0.5 - translation - rotationPivot;
 
     // keept the width/height scale while rotating
     mediump float stScale = resolution.x / resolution.y;
 
     TexCoordOrig.x *= stScale;
 
-    TexCoord.x = TexCoordOrig.x * cos(-RotationOffset) - TexCoordOrig.y * sin(-RotationOffset);
-    TexCoord.y = TexCoordOrig.y * cos(-RotationOffset) + TexCoordOrig.x * sin(-RotationOffset);
+    TexCoord.x = TexCoordOrig.x * cos(-rotation) - TexCoordOrig.y * sin(-rotation);
+    TexCoord.y = TexCoordOrig.y * cos(-rotation) + TexCoordOrig.x * sin(-rotation);
 
     TexCoord.x /= stScale;
 
-    TexCoord += 0.5;
+    TexCoord += rotationPivot;
 
 
 
