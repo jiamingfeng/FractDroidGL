@@ -203,17 +203,33 @@ void MandelGLWidget::initializeGL()
     }
 
     QGLShader mandelbrotFragShader(QGLShader::Fragment, context());
-    passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
+
+    // try to load the original shader
+    // if the compilation failed, try to fall back plan
+    QFile fragShaderFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
+
+    if (!fragShaderFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+
+    QTextStream in(&fragShaderFile);
+
+    // read the whole shader in one shot, it is a small text file anyway
+    QString fragShaderContent = in.readAll();
+    fragShaderFile.close();
+    passCompiled = mandelbrotFragShader.compileSourceCode(fragShaderContent);
 
     if( passCompiled == false)
     {
         shaderErrors += mandelbrotFragShader.log();
     }
 
-    //use the fallback shader instead
+    // use the fallback shader instead
     if( shaderErrors.isEmpty() == false)
     {
-        passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag_fallback.glsl");
+        QString removeString("//#define FALL_BACK");
+        // locate the comment, uncomment it by remove the "//"
+        fragShaderContent.remove(fragShaderContent.indexOf(removeString), 2);
+        passCompiled = mandelbrotFragShader.compileSourceCode(fragShaderContent);
         shaderErrors = "";
     }
 
@@ -232,7 +248,7 @@ void MandelGLWidget::initializeGL()
     rotFractLoc = mandelProgram->uniformLocation("rotRadian");
     rotPivotFractLoc = mandelProgram->uniformLocation("rotatePivot");
     iterFractLoc = mandelProgram->uniformLocation("maxIterations");
-    centerFractLoc = mandelProgram->uniformLocation("center");    
+    centerFractLoc = mandelProgram->uniformLocation("center");
     lookupTextureLoc = mandelProgram->uniformLocation("lookUpTexture");
 
     //set up the post effect shader program to do the final rendering
@@ -351,8 +367,6 @@ void MandelGLWidget::resizeGL(int width, int height)
 
 void MandelGLWidget::paintGL()
 {
-
-    //QVector2D resolution(float(width()), float(height()));
 
     if(renderMandelbrot)
     {
@@ -475,6 +489,14 @@ void MandelGLWidget::paintGL()
 
         hudMessage += "\nIters: ";
         tempStr.setNum(int(maxInterations));
+        hudMessage += tempStr;
+
+        hudMessage += "\nCenter: ";
+        tempStr.setNum(centerPos.x(), 'f', 5);
+        hudMessage += "\n";
+        hudMessage += tempStr;
+        tempStr.setNum(centerPos.y(), 'f', 5);
+        hudMessage += "\n";
         hudMessage += tempStr;
 
 #endif

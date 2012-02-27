@@ -5,6 +5,5 @@
         <file>Resources/vert.glsl</file>
         <file>Resources/mandelbrot_vert.glsl</file>
         <file>Resources/mandelbrot_frag.glsl</file>
-        <file>Resources/mandelbrot_frag_fallback.glsl</file>
     </qresource>
 </RCC>
