@@ -28,23 +28,35 @@
 //#define SHOW_PERIODICITY_CHECK
 
 
+// enable/disable fall back shader code for Tegra 2 GPU
+//#define FALL_BACK
+
+#ifdef FALL_BACK
+const int FIX_ITERATION = 256;
+#endif
 
 uniform sampler2D lookUpTexture;
 uniform int maxIterations;
 
 uniform mediump float rotRadian;    //rotation in radian
-uniform highp dvec2 rotatePivot;
-uniform highp dvec2 center;
+uniform mediump vec2 rotatePivot;
+uniform mediump vec2 center;
 
 varying mediump vec2 TexCoord;
 
 const mediump float epsilon = 1e-6;
-const mediump float log2 = log(2.0);
+const mediump float LOG_2 = log(2.0);
 
 void main (void)
 {
+#ifdef FALL_BACK
+    int iterationCount = FIX_ITERATION;
+#else
+    int iterationCount = maxIterations;
+#endif
+
     highp dvec2 c;
-    highp dvec2 TexCoordMod;
+    mediump dvec2 TexCoordMod;
 
     TexCoordMod.x = double(TexCoord.x) - rotatePivot.x + center.x;
     TexCoordMod.y = double(TexCoord.y) - rotatePivot.y + center.y;
@@ -59,15 +71,15 @@ void main (void)
     // cardioid
     // q = ( x - 1/4 )^2 + y^2
     // q ( q + ( x - 1/4 )) < 1/4 y^2
-    mediump double cx = c.x - 0.25;
-    mediump double cy2 = c.y * c.y;
-    mediump double q = cx * cx + cy2;
+    mediump float cx = float(c.x - 0.25);
+    mediump float cy2 = float(c.y * c.y);
+    mediump float q = cx * cx + cy2;
 
     if ( 4.0 * q * (q + cx) >= cy2 )
     {
         // period-2 bulb
         // (x + 1) ^2 + y ^ 2 < 1/16
-        mediump double cxp12 = (c.x + 1.0) * (c.x + 1.0);
+        mediump float cxp12 = float((c.x + 1.0) * (c.x + 1.0));
 
         if ( cxp12 + cy2 >= 0.0625 )
         {
@@ -91,7 +103,7 @@ void main (void)
             // (e.g.  i < 64 instead of i < maxIterations)
             int i;
 
-            for ( i = 0; i < maxIterations && dot(z, z) < 4.0; i ++)
+            for ( i = 0; i < iterationCount && dot(z, z) < 4.0; i ++)
             {
                 z = dvec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
 
@@ -126,15 +138,15 @@ void main (void)
             }
 
 #ifdef ENABLE_PERIODICITY_CHECK
-            if ( periodicityCheckFailed == false && i < maxIterations + 1 )
+            if ( periodicityCheckFailed == false && i < iterationCount + 1 )
 #else
-            if ( i < maxIterations + 1 )
+            if ( i < iterationCount + 1 )
 #endif
             {
                 //Normalized Iteration Count to get a smoother image
                 //smooth iter = iter + ( log(log(bailout)-log(log(cabs(z))) )/log(2)
 
-                s.x = (float(i) - log(log(float(dot(z, z)))/ 2.0) / log2) / float(maxIterations);
+                s.x = (float(i) - log(log(float(dot(z, z)))/ 2.0) / LOG_2) / float(iterationCount);
                 //bgColor = texture2D(lookUpTexture, s).bgra;
             }
         }

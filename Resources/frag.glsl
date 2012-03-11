@@ -22,5 +22,8 @@ varying mediump vec2 TexCoord;
 
 void main(void)
 {
-    gl_FragColor = texture2D(fboTexture, TexCoord);
+    if(TexCoord.x > 1.0 || TexCoord.x < 0.0 || TexCoord.y > 1.0 || TexCoord.y < 0.0)
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.5);
+    else
+        gl_FragColor = texture2D(fboTexture, TexCoord);
 }

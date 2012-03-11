@@ -20,6 +20,15 @@
 #ifndef MandelGLWidget_h__
 #define MandelGLWidget_h__
 
+//use QtConcurrent to handel thread
+//#define USE_QT_CONCURRENT
+
+//use qthread to do low level threading
+//#define USE_QT_MULTI_THREAD
+
+//use single threading
+#define USE_SINGLE_THREAD
+
 #include <QMatrix4x4>
 #include <QVector2D>
 #include <QTime>
@@ -38,9 +47,15 @@ QT_BEGIN_NAMESPACE
     class QPinchGesture;
     class QTapAndHoldGesture;
     class QTapGesture;
+
+#ifdef USE_QT_CONCURRENT
+    template <typename T>
+    class QFutureWatcher;
+#endif
 QT_END_NAMESPACE
 
-class BufferSwapWorker;
+
+class FractalRenderer;
 
 class MandelGLWidget : public QGLWidget, protected QGLFunctions
 {
@@ -58,12 +73,16 @@ public:
 	MandelGLWidget(QWidget* parentWindow = 0);
 	~MandelGLWidget();
 
+    void RenderFractal();
+
 signals:
     // emit the swap buffer signal after all the gl calls
-    void NeedSwapBuffer();
+    //void NeedSwapBuffer();
+    void StartFractalRendering();
 
 public slots:
-    void startRendering();
+    //void startRendering();
+    void updateRenderFBO();
 
 protected:
 
@@ -71,6 +90,12 @@ protected:
 	void initializeGL();
 	void resizeGL(int width, int height);
     void paintGL();
+
+    void StartInteraction();
+    void StopInteraction();
+
+    void BindFBO();
+    void ReleaseFBO();
 
 #if !defined (Q_OS_ANDROID)
     // mouse events
@@ -101,8 +126,14 @@ private:
     void DrawHUD();
     void ComputeHUDRect();
 
-
 private:
+
+    FractalRenderer* renderer;
+    QThread          renderThread;
+
+#ifdef USE_QT_CONCURRENT
+    QFutureWatcher<bool>*  watcher;
+#endif
 
     // shader objects
 	QGLShaderProgram* mandelProgram;
@@ -112,13 +143,17 @@ private:
     bool passCompiled;
 
     // frame buffer object
-    QGLFramebufferObject* fbo;
+    QGLFramebufferObject* fbo[2];
+    int currentIndex;
+    int nextIndex;
+    const static int PING_PONG_COUNT = 2;
 
     // shader errors
     QString shaderErrors;
 
 	// texture object
 	GLuint lookupTextureId;
+    GLuint fboId;
 
     // render loop timer
     QTimer *renderLoopTimer;

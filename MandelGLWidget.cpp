@@ -21,15 +21,19 @@
 #include "MandelGLWidget.h"
 #include <QtOpenGL/QtOpenGL>
 #include <QtCore/qmath.h>
-
+#include <QFutureWatcher>
 #include <math.h>
 
-// updates with highest framerate
-#define PERFORMANCE_TEST
+#include "fractalrenderer.h"
 
+// updates with highest framerate
+//#define PERFORMANCE_TEST
+
+//turn on and off HUD
 #define SHOW_HUD
 
-#define SHOW_DEBUG_HUD
+//turn on and off debug hud
+//#define SHOW_DEBUG_HUD
 
 // updates only when user interact with the mandelbrot set
 //#define INTERACTIVE_UPDATES_ONLY
@@ -46,6 +50,9 @@ const GLushort quad_indices[] = {0,1,2, 2,3,0};
 
 const float ZOOM_STEP = 1.2f;           // zoom step for pin zoom
 const float INTERATION_STEP = 1.06f;    // interaction change step
+const float INIT_ITERATION = 64.0f;     // init iteration count
+const float LOG_BASE = 8.0f;
+const float LN_LOG_BASE = float(qLn(LOG_BASE));
 const float AUTO_INTERATION_FACTOR = INTERATION_STEP / ZOOM_STEP;
 const float MAX_ONE_SHOT_ZOOM = 50.0f;
 
@@ -57,9 +64,21 @@ const float DEGREE_TO_RADIAN = 0.01745329251994329576923690768489f; // PI / 180
 MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     : QGLWidget(parentWindow)
 {
+    renderer = 0;
+
+#ifdef USE_QT_CONCURRENT
+    watcher = new QFutureWatcher<bool>(this);
+#endif
+
     mandelProgram = 0;
-    fbo           = 0;
-    lookupTextureId = 0;    
+    currentIndex    = 0;
+    nextIndex       = 1;
+    for(int i=0; i < MandelGLWidget::PING_PONG_COUNT; i++)
+    {
+        fbo[i] = 0;
+    }
+    lookupTextureId = 0;
+    fboId = 0;
     modelViewProjection.setToIdentity();
     projectMat.setToIdentity();
 
@@ -90,10 +109,10 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
 
 
     // default values for the shader
-    centerPos = QVector2D(-0.5, 0.0);
-    scaleFactor = 1.0f;
-    previousScale = 1.0f;
-    maxInterations = 64.0f;
+    centerPos = QVector2D(-0.5, 0.0);//QVector2D(-0.74635183346747f, 0.09853820615559f);
+    scaleFactor = 0.8f;//1333333333.333333333f;
+    previousScale = scaleFactor;
+    maxInterations = INIT_ITERATION;
 
     // statistics
     frames = 0;
@@ -107,6 +126,7 @@ MandelGLWidget::MandelGLWidget(QWidget* parentWindow /* = 0 */)
     // disable background filling
     setAutoFillBackground(false);
     setAttribute(Qt::WA_NoSystemBackground, true);
+    setAttribute(Qt::WA_PaintOutsidePaintEvent, true);
     setAutoBufferSwap(false);
 
     rotation = 0.0f;
@@ -140,6 +160,21 @@ MandelGLWidget::~MandelGLWidget()
     delete renderLoopTimer;
     renderLoopTimer = 0;
 
+#ifdef USE_QT_MULTI_THREAD
+    if(renderThread.isRunning())
+    {
+        renderThread.quit();
+    }
+#endif
+
+#ifdef USE_QT_CONCURRENT
+    delete watcher;
+    watcher = 0;
+#endif
+
+    delete renderer;
+    renderer = 0;
+
     // shaders
     delete mandelProgram;
     mandelProgram = 0;
@@ -152,8 +187,11 @@ MandelGLWidget::~MandelGLWidget()
 
 
     // fbo
-    delete fbo;
-    fbo = 0;
+    for(int i=0; i < MandelGLWidget::PING_PONG_COUNT; i++)
+    {
+        delete fbo[i];
+        fbo[i] = 0;
+    }
 
     glDisable(GL_TEXTURE_2D);
 
@@ -164,7 +202,8 @@ MandelGLWidget::~MandelGLWidget()
 }
 
 void MandelGLWidget::initializeGL()
-{    
+{
+    renderer = new FractalRenderer(this);
 
     initializeGLFunctions();
 
@@ -203,17 +242,33 @@ void MandelGLWidget::initializeGL()
     }
 
     QGLShader mandelbrotFragShader(QGLShader::Fragment, context());
-    passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
+
+    // try to load the original shader
+    // if the compilation failed, try to fall back plan
+    QFile fragShaderFile(":/FractDroidGL/Resources/mandelbrot_frag.glsl");
+
+    if (!fragShaderFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+
+    QTextStream in(&fragShaderFile);
+
+    // read the whole shader in one shot, it is a small text file anyway
+    QString fragShaderContent = in.readAll();
+    fragShaderFile.close();
+    passCompiled = mandelbrotFragShader.compileSourceCode(fragShaderContent);
 
     if( passCompiled == false)
     {
         shaderErrors += mandelbrotFragShader.log();
     }
 
-    //use the fallback shader instead
+    // use the fallback shader instead
     if( shaderErrors.isEmpty() == false)
     {
-        passCompiled = mandelbrotFragShader.compileSourceFile(":/FractDroidGL/Resources/mandelbrot_frag_fallback.glsl");
+        QString removeString("//#define FALL_BACK");
+        // locate the comment, uncomment it by remove the "//"
+        fragShaderContent.remove(fragShaderContent.indexOf(removeString), 2);
+        passCompiled = mandelbrotFragShader.compileSourceCode(fragShaderContent);
         shaderErrors = "";
     }
 
@@ -232,7 +287,7 @@ void MandelGLWidget::initializeGL()
     rotFractLoc = mandelProgram->uniformLocation("rotRadian");
     rotPivotFractLoc = mandelProgram->uniformLocation("rotatePivot");
     iterFractLoc = mandelProgram->uniformLocation("maxIterations");
-    centerFractLoc = mandelProgram->uniformLocation("center");    
+    centerFractLoc = mandelProgram->uniformLocation("center");
     lookupTextureLoc = mandelProgram->uniformLocation("lookUpTexture");
 
     //set up the post effect shader program to do the final rendering
@@ -287,7 +342,10 @@ void MandelGLWidget::initializeGL()
     //postEffectProgram->enableAttributeArray(uvAttrLoc);
 
     //init fbo
-    fbo = new QGLFramebufferObject(width(), height());
+    for(int i=0; i < MandelGLWidget::PING_PONG_COUNT; i++)
+    {
+        fbo[i] = new QGLFramebufferObject(width(), height());
+    }
 
     // Clear the background with black color
     glClearColor(0, 0, 0, 1.0f);
@@ -304,6 +362,20 @@ void MandelGLWidget::initializeGL()
 #endif
     renderLoopTimer->start();
 #endif
+
+#if defined ( USE_QT_CONCURRENT )
+    connect(watcher, SIGNAL(finished()), this, SLOT(updateRenderFBO()));
+#else
+    connect(renderer, SIGNAL(FinishedRendering()),
+        this, SLOT(updateRenderFBO()));
+    connect(this, SIGNAL(StartFractalRendering()),
+        renderer, SLOT(StartRendering()));
+#if defined (USE_QT_MULTI_THREAD)
+    renderer->moveToThread(&renderThread);
+#endif  //USE_QT_MULTI_THREAD
+#endif  //USE_QT_CONCURRENT
+    
+    //StopInteraction();
 
 }
 
@@ -336,87 +408,41 @@ void MandelGLWidget::resizeGL(int width, int height)
     UpdateProjectedScales();
 
     // nuke the framebuffer if size changes
-    if (fbo->width() != width || fbo->height() != height)
+    for(int i=0; i < MandelGLWidget::PING_PONG_COUNT; i++)
     {
-        delete fbo;
-        fbo = new QGLFramebufferObject(width, height);
+        if (fbo[i]->width() != width || fbo[i]->height() != height)
+        {
+            delete fbo[i];
+            fbo[i] = new QGLFramebufferObject(width, height);
+        }
     }
 
     // re-compute the rect for HUD after resizing
     isHUDDirty = true;
 
-    renderMandelbrot = true;
+    StopInteraction();
 
 }
 
 void MandelGLWidget::paintGL()
 {
+    makeCurrent();
 
-    //QVector2D resolution(float(width()), float(height()));
+    //first time init
+    if(fboId == 0)
+        StopInteraction();
 
-    if(renderMandelbrot)
-    {
-        fbo->bind();
-
-        glClear(GL_COLOR_BUFFER_BIT);// | GL_DEPTH_BUFFER_BIT);
-
-        //render the mandelbrot image beigns
-        mandelProgram->bind();
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, lookupTextureId);
-
-
-        // Set vertexarray to the shader
-        mandelProgram->enableAttributeArray(posFractLoc);
-        mandelProgram->setAttributeArray(posFractLoc, quad_vertices, 2 );
-
-        mandelProgram->enableAttributeArray(uvFractLoc);
-        mandelProgram->setAttributeArray(uvFractLoc, quad_uvs, 2 );
-
-        //shader's parameters
-        mandelProgram->setUniformValue(mvpFractLoc, modelViewProjection );
-        mandelProgram->setUniformValue(scaleFractLoc, scaleFactor);
-        mandelProgram->setUniformValue(resFractLoc, whScale);
-        mandelProgram->setUniformValue(rotFractLoc, rotation);
-        mandelProgram->setUniformValue(rotPivotFractLoc, rotationPivot);
-        mandelProgram->setUniformValue(iterFractLoc, int(maxInterations + 0.5f));
-        mandelProgram->setUniformValue(centerFractLoc, centerPos);
-        mandelProgram->setUniformValue(lookupTextureLoc, 0);
-
-        // draw the quad
-        glDrawElements(GL_TRIANGLES, 2*3, GL_UNSIGNED_SHORT, quad_indices );
-
-        //glBindTexture(GL_TEXTURE_2D, 0);
-
-        //mandelProgram->disableAttributeArray(uvAttrLoc);
-        //mandelProgram->disableAttributeArray(posAttrLoc);
-
-        //render the mandelbrot image ends
-        mandelProgram->release();
-
-        fbo->release();
-
-        renderMandelbrot = false;
-
-        // zero the temp offset after we update the actual computing result
-        textCoordOffset.setX(0);
-        textCoordOffset.setY(0);
-        rotationOffset = 0.0f;
-        rotationPivotSS.setX(0);
-        rotationPivotSS.setY(0);
-        imageScale = 1.0f;
-    }
+    glDisable(GL_CULL_FACE);
 
     glClear(GL_COLOR_BUFFER_BIT);
 
     //render the post effect
     postEffectProgram->bind();
 
-    //glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, fbo->texture());
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fboId);
 
-    // Set vertexarray to the shader
+    // Set vertex array to the shader
     postEffectProgram->enableAttributeArray(posPostLoc);
     postEffectProgram->setAttributeArray(posPostLoc, quad_vertices, 2 );
 
@@ -436,10 +462,10 @@ void MandelGLWidget::paintGL()
     // draw the quad
     glDrawElements(GL_TRIANGLES, 2*3, GL_UNSIGNED_SHORT, quad_indices );
 
-    //glBindTexture(GL_TEXTURE_2D, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
-    //postEffectProgram->disableAttributeArray(uvAttrLoc);
-    //postEffectProgram->disableAttributeArray(posAttrLoc);
+    postEffectProgram->disableAttributeArray(uvPostLoc);
+    postEffectProgram->disableAttributeArray(posPostLoc);
 
     //render the mandelbrot image ends
     postEffectProgram->release();
@@ -461,7 +487,7 @@ void MandelGLWidget::paintGL()
 
         QString tempStr;
 
-        //shader paremters
+        //shader paremeters
 
         hudMessage += "\nZoom: ";
         tempStr.setNum(scaleFactor, 'f', 2);
@@ -471,10 +497,17 @@ void MandelGLWidget::paintGL()
         tempStr.setNum(rotation * RADIAN_TO_DEGREE, 'f', 1);
         hudMessage += tempStr;
 
-#ifdef SHOW_DEBUG_HUD
-
-        hudMessage += "\nIters: ";
+        hudMessage += "\nIterations: ";
         tempStr.setNum(int(maxInterations));
+        hudMessage += tempStr;
+
+#ifdef SHOW_DEBUG_HUD
+        hudMessage += "\nCenter position: ";
+        tempStr.setNum(centerPos.x(), 'f', 8);
+        hudMessage += "\n";
+        hudMessage += tempStr;
+        tempStr.setNum(centerPos.y(), 'f', 8);
+        hudMessage += "\n";
         hudMessage += tempStr;
 
 #endif
@@ -497,14 +530,8 @@ void MandelGLWidget::paintGL()
 
     swapBuffers();
     //emit NeedSwapBuffer();
-}
 
-void MandelGLWidget::startRendering()
-{
-    if(renderLoopTimer)
-    {
-        renderLoopTimer->start();
-    }
+    doneCurrent();
 }
 
 void MandelGLWidget::DrawHUD()
@@ -544,7 +571,7 @@ void MandelGLWidget::mousePressEvent(QMouseEvent *event)
         lastDragPos = event->pos();
 
         //stop the mandelbrot rendering
-        renderMandelbrot = false;
+        StartInteraction();
 
     }
 }
@@ -564,11 +591,9 @@ void MandelGLWidget::mouseMoveEvent(QMouseEvent *event)
 void MandelGLWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     Q_UNUSED(event);
-    // resume the rendering after mouse released
-    renderMandelbrot = true;
-//    textCoordOffset.setX(0);
-//    textCoordOffset.setY(0);
-//    screenPivot = event->posF();
+
+    // resume the rendering after mouse released 
+    StopInteraction();
 }
 
 #endif
@@ -581,17 +606,18 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
 
     // zoom in
     case Qt::Key_Z:
-        scaleFactor *= 1.2f;
-        maxInterations *= 1.06f;
+        scaleFactor *= ZOOM_STEP;
+        // interation = log10(scaleFactor) * INIT_ITERATION when scaleFactor > 10
+        maxInterations = (scaleFactor < LOG_BASE ? 1.0f : (float(qLn(scaleFactor)) / LN_LOG_BASE)) * INIT_ITERATION;  // *= INTERATION_STEP;
 
-        renderMandelbrot = true;
+        StartInteraction();
         break;
     // zoom out
     case Qt::Key_X:
-        scaleFactor /= 1.2f;
-        maxInterations /= 1.06f;
+        scaleFactor /= ZOOM_STEP;
+        maxInterations  = (scaleFactor < LOG_BASE ? 1.0f : (float(qLn(scaleFactor)) / LN_LOG_BASE)) * INIT_ITERATION; //  /= INTERATION_STEP;
 
-        renderMandelbrot = true;
+        StartInteraction();
         break;
 
     // rotate 5 degree counter clockwise
@@ -599,7 +625,8 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
         rotation += 5.0f * DEGREE_TO_RADIAN;
         rotationOffset += 5.0f * DEGREE_TO_RADIAN;
         UpdateRotationPivot();
-        //renderMandelbrot = false;
+        
+        StartInteraction();
         break;
 
     // rotate 5 degree clockwise
@@ -607,7 +634,8 @@ void MandelGLWidget::keyPressEvent(QKeyEvent *event)
         rotation -= 5.0f * DEGREE_TO_RADIAN;
         rotationOffset -= 5.0f * DEGREE_TO_RADIAN;
         UpdateRotationPivot();
-        //renderMandelbrot = false;
+        
+        StartInteraction();
         break;
 
     case Qt::Key_Escape:
@@ -623,15 +651,16 @@ void MandelGLWidget::keyReleaseEvent(QKeyEvent *event)
 
     switch (event->key())
     {
-
+    // zoom in
+    case Qt::Key_Z:
+    // zoom out
+    case Qt::Key_X:
     // rotate 5 degree counter clockwise
     case Qt::Key_Up:
-        renderMandelbrot = true;
-        break;
-
     // rotate 5 degree clockwise
     case Qt::Key_Down:
-        renderMandelbrot = true;
+        
+        StopInteraction();
         break;
     default:
         QGLWidget::keyReleaseEvent(event);
@@ -658,14 +687,12 @@ bool MandelGLWidget::event(QEvent *event)
             {
                 lastDragPos = touchPoint0.startPos();
 
-                //stop the mandelbrot rendering
-                renderMandelbrot = false;
+                // stop the mandelbrot rendering
+                StartInteraction();
 
             }
             else if ( touchEvent->touchPointStates() & Qt::TouchPointMoved )
             {
-                //stop the mandelbrot rendering
-                renderMandelbrot = false;
 
                 pixelOffset = touchPoint0.pos() - lastDragPos;
                 lastDragPos = touchPoint0.pos();
@@ -675,7 +702,7 @@ bool MandelGLWidget::event(QEvent *event)
             else if ( touchEvent->touchPointStates() & Qt::TouchPointReleased )
             {
                 // resume the rendering after mouse released
-                renderMandelbrot = true;
+                StopInteraction();
             }
 
             return true;
@@ -709,12 +736,12 @@ void MandelGLWidget::handelPanGesture(QPanGesture *gesture)
     {
     case Qt::GestureStarted:
         //stop the mandelbrot rendering
-        renderMandelbrot = false;
+        StartInteraction();
         break;
     case Qt::GestureUpdated:
     {
         //stop the mandelbrot rendering
-        renderMandelbrot = false;
+        StartInteraction();
 #ifndef QT_NO_CURSOR
         setCursor(Qt::SizeAllCursor);
 #endif
@@ -728,7 +755,7 @@ void MandelGLWidget::handelPanGesture(QPanGesture *gesture)
     case Qt::GestureFinished:
     case Qt::GestureCanceled:
         //resume the mandelbrot rendering
-        renderMandelbrot = true;
+        StopInteraction();
         break;
     default:
 #ifndef QT_NO_CURSOR
@@ -748,12 +775,12 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
         screenPivot = gesture->centerPoint();
 
         //stop the mandelbrot rendering
-        renderMandelbrot = false;
+        StartInteraction();
         break;
     case Qt::GestureUpdated:
     {
         //stop the mandelbrot rendering
-        renderMandelbrot = false;
+        StartInteraction();
 
         QPinchGesture::ChangeFlags changeFlags = gesture->changeFlags();
 
@@ -792,17 +819,12 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
 
             currentScaleFactor = 1.0f;
 
-            // update the interation according to the zoom level
+            // update the iteration according to the zoom level
 
             float scaleLevel = scaleFactor / previousScale;
-            if( scaleLevel > ZOOM_STEP )
+            if( scaleLevel > ZOOM_STEP || scaleLevel  < 1.0f / ZOOM_STEP )
             {
-                maxInterations *= INTERATION_STEP;
-                previousScale = scaleFactor;
-            }
-            else if ( scaleLevel  < 1.0f / ZOOM_STEP )
-            {
-                maxInterations /= INTERATION_STEP;
+                maxInterations = (scaleFactor < LOG_BASE ? 1.0f : (float(qLn(scaleFactor)) / LN_LOG_BASE)) * INIT_ITERATION;
                 previousScale = scaleFactor;
             }
 
@@ -815,10 +837,7 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
             //newPivot = p0 + (p1 - p0 ) t  [t | t > 0 && t < 1]
             //pivotOffset = (QPointF(width()/2.0f, height()/2.0f) - screenPivot) * scaleLevel / MAX_ONE_SHOT_ZOOM;
 
-
             UpdateMandelbrotCenter(pivotOffset);
-
-
 
             currentGesture = MandelGLWidget::PIN_ZOOM;
         }
@@ -829,7 +848,7 @@ void MandelGLWidget::handelPinchGesture(QPinchGesture *gesture)
     case Qt::GestureFinished:
     case Qt::GestureCanceled:
         //resume the mandelbrot rendering
-        renderMandelbrot = true;
+        StopInteraction();
 
         //reset the current gesture to none
         currentGesture = MandelGLWidget::NONE;
@@ -852,12 +871,8 @@ void MandelGLWidget::UpdateMandelbrotCenter(QPointF& pixelOffset)
 {
 
     //rotate the movement offset according to current rotation in mobile platform
-#if defined (Q_OS_ANDROID)
     QPointF rotatedOffset( pixelOffset.x() * cos(-rotation) - pixelOffset.y() * sin(-rotation),
                            pixelOffset.y() * cos(-rotation) + pixelOffset.x() * sin(-rotation));
-#else
-    QPointF rotatedOffset(pixelOffset);
-#endif
 
     // remap the pixel offset from [0, width][0, height] to [-2, 1][-1, 1]
     centerPos.setX(centerPos.x() + rotatedOffset.x() * projectedScaleFactor.x() / scaleFactor);
@@ -893,4 +908,110 @@ void MandelGLWidget::UpdateProjectedScales()
     float newScaleFactor = 4.0f / float(height());
     projectedScaleFactor.setX ( -newScaleFactor);
     projectedScaleFactor.setY ( newScaleFactor);
+}
+
+void MandelGLWidget::RenderFractal()
+{
+    BindFBO();
+
+    glDisable(GL_CULL_FACE);
+    glClear(GL_COLOR_BUFFER_BIT);// | GL_DEPTH_BUFFER_BIT);
+
+    //render the mandelbrot image beigns
+    mandelProgram->bind();
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, lookupTextureId);
+
+
+    // Set vertexarray to the shader
+    mandelProgram->enableAttributeArray(posFractLoc);
+    mandelProgram->setAttributeArray(posFractLoc, quad_vertices, 2 );
+
+    mandelProgram->enableAttributeArray(uvFractLoc);
+    mandelProgram->setAttributeArray(uvFractLoc, quad_uvs, 2 );
+
+    //shader's parameters
+    mandelProgram->setUniformValue(mvpFractLoc, modelViewProjection );
+    mandelProgram->setUniformValue(scaleFractLoc, scaleFactor);
+    mandelProgram->setUniformValue(resFractLoc, whScale);
+    mandelProgram->setUniformValue(rotFractLoc, rotation);
+    mandelProgram->setUniformValue(rotPivotFractLoc, rotationPivot);
+    mandelProgram->setUniformValue(iterFractLoc, int(maxInterations + 0.5f));
+    mandelProgram->setUniformValue(centerFractLoc, centerPos);
+    mandelProgram->setUniformValue(lookupTextureLoc, 0);
+
+    // draw the quad
+    glDrawElements(GL_TRIANGLES, 2*3, GL_UNSIGNED_SHORT, quad_indices );
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    mandelProgram->disableAttributeArray(uvFractLoc);
+    mandelProgram->disableAttributeArray(posFractLoc);
+
+    //render the mandelbrot image ends
+    mandelProgram->release();
+
+    ReleaseFBO();
+}
+
+void MandelGLWidget::StartInteraction()
+{
+#if  defined ( USE_QT_CONCURRENT )
+
+    if(watcher->isRunning())
+    {
+        watcher->waitForFinished();
+    }
+
+#elif defined ( USE_QT_MULTI_THREAD )
+
+    if(renderThread.isRunning())
+    {
+        renderThread.quit();
+    }
+#endif
+}
+
+void MandelGLWidget::StopInteraction()
+{
+#if defined ( USE_QT_CONCURRENT )
+    QFuture<bool> future = QtConcurrent::run(renderer, &FractalRenderer::StartRendering);
+    watcher->setFuture(future);
+#else
+#if defined ( USE_QT_MULTI_THREAD )
+    if(!renderThread.isRunning())
+    {
+        renderThread.start();
+    }
+#endif  //USE_QT_MULTI_THREAD
+    emit StartFractalRendering();
+#endif  //USE_QT_CONCURRENT
+
+}
+
+void MandelGLWidget::BindFBO()
+{
+    fbo[currentIndex]->bind();
+}
+
+void MandelGLWidget::ReleaseFBO()
+{
+    fbo[currentIndex]->release();
+
+}
+
+void MandelGLWidget::updateRenderFBO()
+{
+    currentIndex = (currentIndex + 1) % PING_PONG_COUNT;
+    nextIndex = (nextIndex + 1) % PING_PONG_COUNT;
+    fboId = fbo[nextIndex]->texture();
+
+    // zero the temp offset after we update the actual computing result
+    textCoordOffset.setX(0);
+    textCoordOffset.setY(0);
+    rotationOffset = 0.0f;
+    rotationPivotSS.setX(0.5);
+    rotationPivotSS.setY(0.5);
+    imageScale = 1.0f;
 }
